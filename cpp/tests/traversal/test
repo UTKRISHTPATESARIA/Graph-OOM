@@ -1,0 +1,4 @@
+./BFS_TEST 50 --source_node=1 --test_file_name=/home/ankit/rapids/graph/data/700m_twitter-2010.csv  --subway=false > bfs_uvm_50-twitter_700.txt
+./BFS_TEST 50 --source_node=1 --test_file_name=/home/ankit/rapids/graph/data/700m_twitter-2010.csv  --subway=true > bfs_subway_50-twitter_700.txt
+./BFS_TEST 50 --source_node=1 --test_file_name=/home/ankit/rapids/graph/data/nyc_2014_to_2019_700m.csv  --subway=true > bfs_subway_50-nyc_700.txt
+./BFS_TEST 50 --source_node=1 --test_file_name=/home/ankit/rapids/graph/data/nyc_2014_to_2019_700m.csv  --subway=false > bfs_uvm_50-nyc_700.txt
