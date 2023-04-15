@@ -81,7 +81,7 @@ struct e_op_t {
   __device__ thrust::optional<vertex_t> operator()(
     vertex_t src, vertex_t dst, thrust::nullopt_t, thrust::nullopt_t, thrust::nullopt_t) const
   {
-    bool push{};
+    /*bool push{};
     if constexpr (multi_gpu) {
       auto dst_offset = dst - dst_first;
       auto old        = atomicOr(visited_flags.get_iter(dst_offset), uint8_t{1});
@@ -96,7 +96,9 @@ struct e_op_t {
         push     = ((old & mask) == 0);
       }
     }
-    return push ? thrust::optional<vertex_t>{src} : thrust::nullopt;
+    printf("push=%d\n", push);*/
+    //return push ? thrust::optional<vertex_t>{src} : thrust::nullopt;
+    return thrust::optional<vertex_t>{src};
   }
 };
 
@@ -179,18 +181,17 @@ void bfs(raft::handle_t const& handle,
                 "GraphViewType should support the push model.");
 
   auto const num_vertices = push_graph_view.number_of_vertices();
-  std::cout<<"Number of vertices in impl for partition "<<num_vertices<<"\n";
+  //std::cout<<"Number of vertices in impl for partition "<<num_vertices<<"\n";
 
-  /*int* host_subvertex = new int[num_vertices];
-
-  cudaMemcpy((void*)host_subvertex, (void*)subVertex, num_vertices*sizeof(int), cudaMemcpyDeviceToHost);
-  std::cout<<"Host subvertex passed "<<num_vertices<<"\n";
-  for(int i=0;i<num_vertices;i++)
+  //int* host_subvertex = new int[num_vertices];
+  //cudaMemcpy((void*)host_subvertex, (void*)subVertex, nodes*sizeof(int), cudaMemcpyDeviceToHost);
+  /*std::cout<<"Host subvertex passed "<<num_vertices<<"\n";
+  for(int i=0;i<nodes;i++)
     std::cout<<i<<" "<<host_subvertex[i]<<"\n";
 
-  std::cout<<"\n";
+  std::cout<<"\n";*/
 
-  int* host_visited = new int[vis_size];
+  /*int* host_visited = new int[vis_size];
 
   cudaMemcpy((void*)host_visited, (void*)visited, vis_size*sizeof(int), cudaMemcpyDeviceToHost);
   std::cout<<"Host visited passed\n";
@@ -268,7 +269,7 @@ void bfs(raft::handle_t const& handle,
   constexpr size_t bucket_idx_cur  = 0;
   constexpr size_t bucket_idx_next = 1;
   constexpr size_t num_buckets     = 2;
-  printf("Frontier Created\n");
+  //("Frontier Created\n");
 
   vertex_frontier_t<vertex_t, void, GraphViewType::is_multi_gpu, true> vertex_frontier(handle,
                                                                                        num_buckets);
@@ -295,9 +296,12 @@ void bfs(raft::handle_t const& handle,
   }
 
 
-  printf("Before BFS\n");
+  //printf("Before BFS\n");
   // 4. BFS iteration
   vertex_t depth{0};
+  bool finished;
+	bool *d_finished;
+	cudaMalloc(&d_finished, sizeof(bool));
   while (true) {
     if (direction_optimizing) {
       CUGRAPH_FAIL("unimplemented.");
@@ -323,7 +327,9 @@ void bfs(raft::handle_t const& handle,
                      prev_visited_flags.begin());
         }
       }
-      printf("After  visited flags fill\n");
+   //   std::cout<<"flag sizes ------ "<<prev_visited_flags.size()<<" "<<vis_size<<"\n";
+
+     // printf("After  visited flags fill\n");
       e_op_t<vertex_t, GraphViewType::is_multi_gpu> e_op{};
       if constexpr (GraphViewType::is_multi_gpu) {
         e_op.visited_flags =
@@ -333,8 +339,10 @@ void bfs(raft::handle_t const& handle,
       } else {
         e_op.visited_flags      = label1 ? visited: visited_flags.data();
         e_op.prev_visited_flags = prev_visited_flags.data();
+        // e_op.subway = true;
       }
-      printf("Before transform function\n");
+      //printf("depth=%d\n", depth);
+   //   printf("Before transform function\n");
       auto [new_frontier_vertex_buffer, predecessor_buffer] =
         transform_reduce_v_frontier_outgoing_e_by_dst(handle,
                                                       push_graph_view,
@@ -343,7 +351,7 @@ void bfs(raft::handle_t const& handle,
                                                       edge_dst_dummy_property_t{}.view(),
                                                       edge_dummy_property_t{}.view(),
 #if 1
-                                                      e_op,
+                                                       e_op,
 #else
           // FIXME: need to test more about the performance trade-offs between additional
           // communication in updating dst_visited_flags (+ using atomics) vs reduced number of
@@ -365,9 +373,10 @@ void bfs(raft::handle_t const& handle,
                                                       depth % 2 ? label2 : label1,
                                                       depth % 2 ? label1 : label2,
                                                       subVertex,
-                                                      num_vertices);
+                                                      num_vertices,
+                                                      nodes);
 
-    std::cout<<"frontier: \n";
+    /*std::cout<<"frontier: \n";
     vertex_t *host_frontier = new vertex_t[new_frontier_vertex_buffer.size()];
     cudaMemcpy((void*)host_frontier, (void*)new_frontier_vertex_buffer.data(),new_frontier_vertex_buffer.size()*sizeof(vertex_t),cudaMemcpyDeviceToHost );
     for(int i=0;i<new_frontier_vertex_buffer.size();i++){
@@ -387,9 +396,14 @@ void bfs(raft::handle_t const& handle,
     for(int i=0;i<nodes;i++){
         std::cout<<host_label2[i]<<" ";
     }
-    std::cout<<"\n";
+    std::cout<<"\n";*/
 
-    printf("After transform function\n");
+
+   printf("After transform function\n");
+  
+    finished = true;
+    
+		cudaMemcpy(d_finished, &finished, sizeof(bool), cudaMemcpyHostToDevice);
     update_v_frontier(
       handle,
       push_graph_view,
@@ -399,14 +413,52 @@ void bfs(raft::handle_t const& handle,
       std::vector<size_t>{bucket_idx_next},
       distances,
       thrust::make_zip_iterator(thrust::make_tuple(distances, predecessor_first)),
-      [depth] __device__(auto v, auto v_val, auto pushed_val) {
+      /*[distances] __device__(auto v, auto v_val, auto pushed_val) {
         auto update = (v_val == invalid_distance);
         return thrust::make_tuple(
           update ? thrust::optional<size_t>{bucket_idx_next} : thrust::nullopt,
           update ? thrust::optional<thrust::tuple<vertex_t, vertex_t>>{thrust::make_tuple(
-                      depth + 1, pushed_val)}
+                      distances[pushed_val] + 1, pushed_val)}
                   : thrust::nullopt);
-      });
+      },*/
+      [distances, predecessor_first, d_finished, label1, label2, depth] __device__(auto v, auto v_val, auto pushed_val) {
+        //auto update = (v_val == invalid_distance);
+       // printf("vertex in update op=%d\n", v);
+        auto update = false;
+        auto to_compare_with = distances[pushed_val] + 1;
+        if(v_val > to_compare_with){
+          if(depth%2)
+            label1[v] = true;
+          else
+            label2[v] = true;
+          
+          // v_val = to_compare_with;
+          atomicMin(&v_val, to_compare_with);
+          *d_finished = false;
+          update = true;
+        }
+        return thrust::make_tuple(
+          update ? thrust::optional<size_t>{bucket_idx_next} : thrust::nullopt,
+          update ? thrust::optional<thrust::tuple<vertex_t, vertex_t>>{thrust::make_tuple(
+                       (vertex_t)v_val, pushed_val)}
+                  : thrust::nullopt);
+      },
+      subVertex
+      );
+     // bool *host_label = new bool[nodes];
+    /*cudaMemcpy((void*)host_label, (void*)label1,nodes*sizeof(bool),cudaMemcpyDeviceToHost );
+    for(int i=0;i<nodes;i++){
+        std::cout<<host_label[i]<<" ";
+    }
+    std::cout<<"\n";
+
+     //bool *host_label2 = new bool[nodes];
+    cudaMemcpy((void*)host_label2, (void*)label2,nodes*sizeof(bool),cudaMemcpyDeviceToHost );
+    for(int i=0;i<nodes;i++){
+        std::cout<<host_label2[i]<<" ";
+    }
+    std::cout<<"\n";*/
+
       
       vertex_frontier.bucket(bucket_idx_cur).clear();
       vertex_frontier.bucket(bucket_idx_cur).shrink_to_fit();
@@ -415,7 +467,10 @@ void bfs(raft::handle_t const& handle,
       if (vertex_frontier.bucket(bucket_idx_cur).aggregate_size() == 0) {
         break; 
       }
-      
+      cudaMemcpy(&finished, d_finished, sizeof(bool), cudaMemcpyDeviceToHost);
+      if(finished){
+        break;
+      }
     }
 
     depth++;

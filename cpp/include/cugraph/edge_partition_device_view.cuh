@@ -110,31 +110,15 @@ struct local_degree_op_t_subway {
 
   __device__ return_type_t operator()(vertex_t major) const
   {
-    if constexpr (multi_gpu) {
-      vertex_t idx{};
-      if constexpr (use_dcs) {
-        if (major < major_hypersparse_first) {
-          idx = major - major_range_first;
-          return static_cast<return_type_t>(offsets[idx + 1] - offsets[idx]);
-        } else {
-          auto major_hypersparse_idx =
-            major_hypersparse_idx_from_major_nocheck_impl(dcs_nzd_vertices, major);
-          if (major_hypersparse_idx) {
-            idx = (major_hypersparse_first - major_range_first) + *major_hypersparse_idx;
-            return static_cast<return_type_t>(offsets[idx + 1] - offsets[idx]);
-          } else {
-            return return_type_t{0};
-          }
-        }
-      } else {
-        idx = major - major_range_first;
-        return static_cast<return_type_t>(offsets[idx + 1] - offsets[idx]);
+      //printf("why\n");
+      if(sub_vertex[major] == -1)
+        return 0;
+      if(major > 41652220 || major<0){
+       // printf("Errorooorrr RRREEEEDDDDDD FLAGGGG in edge\n");
       }
-    } else {
-      /*printf("major=%d subvertex[major+1]=%d subVertex[major]=%d offsets[...]=%d\n", major, sub_vertex[major+1], sub_vertex[major],
-      offsets[sub_vertex[major] + 1]);*/
+     // printf("major=%d subvertex[major+1]=%d subVertex[major]=%d offsets[.m+1.]=%d offsets[..m..]=%d diff=%d\n", major, sub_vertex[major]+1, sub_vertex[major],
+      //offsets[sub_vertex[major] + 1], offsets[sub_vertex[major]],offsets[sub_vertex[major] + 1] - offsets[sub_vertex[major]] );
       return static_cast<return_type_t>(offsets[sub_vertex[major] + 1] - offsets[sub_vertex[major]]);
-    }
   }
 };
 
@@ -402,7 +386,7 @@ class edge_partition_device_view_t<vertex_t, edge_t, multi_gpu, std::enable_if_t
                                  int* subVertex = nullptr,
                                  const size_t size_ = 0) const
   {
-    printf("Computer number of edges\n");
+   // printf("Computer number of edges\n");
     return thrust::transform_reduce(
       rmm::exec_policy(stream),
       majors.begin(),

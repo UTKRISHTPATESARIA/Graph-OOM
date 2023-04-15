@@ -16,6 +16,7 @@
 
 
 #include <thrust/fill.h>
+#include<fstream>
 
 #include <utilities/base_fixture.hpp>
 #include <utilities/test_graphs.hpp>
@@ -158,16 +159,19 @@ class Tests_BFS : public ::testing::TestWithParam<std::tuple<cugraph::test::BFS_
     rmm::device_uvector<vertex_t> d_predecessors(graph_view.number_of_vertices(),
                                                   handle.get_stream());
     if(sub){
+      //free(*graph.off sets_.data());
+      //free(*graph.indices_.data());
       cout<<"subway starts\n";
       
-      //rmm::mr::cuda_memory_resource cuda_resource;
-      //rmm::mr::set_current_device_resource(&cuda_resource);
+      /*rmm::mr::cuda_memory_resource cuda_resource;
+      rmm::mr::set_current_device_resource(&cuda_resource);*/
 
       auto h_offset_ = cugraph::test::to_host(handle, graph_view.local_edge_partition_view().offsets());
       auto h_indices_ = cugraph::test::to_host(handle, graph_view.local_edge_partition_view().indices());
-
-       std::vector<uint32_t> host_visited_flags((graph_view.local_vertex_partition_range_size() + (sizeof(uint32_t) * 8 - 1)) /
+      //cout<< "range size "<< graph_view.local_vertex_partition_range_size()<<"\n";
+       std::vector<uint32_t>  host_visited_flags((graph_view.local_vertex_partition_range_size() + (sizeof(uint32_t) * 8 - 1)) /
       (sizeof(uint32_t) * 8), 0);
+      cout<<"node  range "<<graph_view.local_vertex_partition_range_size()<<"\n";
 
       graph_view.offsets_ = NULL;
       graph_view.indices_ = NULL;
@@ -175,18 +179,24 @@ class Tests_BFS : public ::testing::TestWithParam<std::tuple<cugraph::test::BFS_
       cudaFree((void*)graph_view.indices_);
 
       
-
+      size_t max_num = 0;
       Graph<OutEdge> bfs_graph("", false);
       bfs_graph.nodePointer = new unsigned int[h_offset_.size()];
       cudaMallocHost(&bfs_graph.edgeList, (h_indices_.size()) * sizeof(unsigned int));
       for(int i=0;i<h_offset_.size();i++){
         bfs_graph.nodePointer[i] = h_offset_[i];
        // cout<<h_offset_[i]<<" ";
+       
       }
      // cout<<"\n";
       for(int i=0;i<h_indices_.size();i++){
         bfs_graph.edgeList[i].end = h_indices_[i];
+        if(max_num < h_indices_[i])
+       {
+        max_num = h_indices_[i];
+       }
       }
+      cout<<"Max Num is "<<max_num<<"\n";
       bfs_graph.outDegree = new unsigned int[h_offset_.size()];
       for(int i=1;i<h_offset_.size();i++){
         bfs_graph.outDegree[i-1] = h_offset_[i] - h_offset_[i-1];
@@ -221,7 +231,7 @@ class Tests_BFS : public ::testing::TestWithParam<std::tuple<cugraph::test::BFS_
       bfs_graph.label1[i] = false;
     }
     bfs_graph.label1[bfs_usecase.source] = true;
-
+    cout<<"Source node "<<bfs_usecase.source<<"\n";
     gpuErrorcheck(cudaMemcpy(bfs_graph.d_label1, bfs_graph.label1, bfs_graph.num_nodes * sizeof(bool), cudaMemcpyHostToDevice));
     Partitioner<OutEdge> partitioner;
     
@@ -248,14 +258,16 @@ class Tests_BFS : public ::testing::TestWithParam<std::tuple<cugraph::test::BFS_
 
     auto visited_flags = cugraph::test::to_device(handle, host_visited_flags);
 
-    hr_timer.stop();
+    hr_timer.stop();  
 
     
     bool *host_label1 = new bool[bfs_graph.num_nodes];
-    
     hr_timer.start("BFSSubway");
     int* host_sub_vertex = new int[bfs_graph.num_nodes];
-    memset(host_sub_vertex, -1, sizeof(host_sub_vertex));
+    for(int i=0;i<bfs_graph.num_nodes;i++){
+      host_sub_vertex[i] = -1;
+    }
+    //memset(host_sub_vertex, -1, sizeof(host_sub_vertex));
     while (subgraph.numActiveNodes>0)
     {
       gItr++;
@@ -266,15 +278,33 @@ class Tests_BFS : public ::testing::TestWithParam<std::tuple<cugraph::test::BFS_
         host_ptr_egdeList[i] = subgraph.activeEdgeList[i].end;
       }
       std::cout<<"Number of partitions: "<<partitioner.numPartitions<<"\n";
+      //partitioner.numPartitions = 2;
       for(int i=0; i<partitioner.numPartitions; i++)
       { 
+       /* if(i==0){
+          partitioner.fromNode[i] = 0;
+          partitioner.partitionNodeSize[i] = 2;
+          partitioner.fromEdge[i] = 0;
+          partitioner.partitionEdgeSize[i] = 4;
+        }
+        else{
+          partitioner.fromNode[i] = 2;
+          partitioner.partitionNodeSize[i] = 9;
+          partitioner.fromEdge[i] = 4;
+          partitioner.partitionEdgeSize[i] = 8;
+        }*/
+        if(partitioner.partitionNodeSize[i] == 0)
+          continue;
         cout<<partitioner.fromNode[i]<<" "<<partitioner.partitionNodeSize[i]<<"\n";
         cout<<partitioner.fromEdge[i]<<" "<<partitioner.partitionEdgeSize[i]<<"\n\n";
         
         rmm::device_uvector<int> device_mapSubvertex(bfs_graph.num_nodes, handle.get_stream());
         for(int j=partitioner.fromNode[i];j<(partitioner.fromNode[i]+partitioner.partitionNodeSize[i]);j++){
+         // cout<<subgraph.activeNodes[j]<<" "<<j-partitioner.fromNode[i]<<"\n";
           host_sub_vertex[subgraph.activeNodes[j]] = j-partitioner.fromNode[i];
+          subgraph.activeNodesPointer[j] -= partitioner.fromEdge[i];
         }
+
         cudaMemcpy(device_mapSubvertex.data(), host_sub_vertex, bfs_graph.num_nodes * sizeof(int), cudaMemcpyHostToDevice);
 
         subgen.callKernel(subgraph, bfs_graph, partitioner, i);
@@ -285,35 +315,50 @@ class Tests_BFS : public ::testing::TestWithParam<std::tuple<cugraph::test::BFS_
         
         gpuErrorcheck(cudaFree((void *)graph_view.offsets_));
         gpuErrorcheck(cudaFree((void *)graph_view.indices_));
-        gpuErrorcheck((cudaMalloc(&graph_view.offsets_, (partitioner.partitionNodeSize[i])*sizeof(edge_t))));
+        
         gpuErrorcheck((cudaMalloc(&graph_view.indices_, partitioner.partitionEdgeSize[i]*sizeof(vertex_t))));
-        gpuErrorcheck(cudaMemcpy((void*)graph_view.offsets_, (void*)(subgraph.activeNodesPointer + partitioner.fromNode[i]), (partitioner.partitionNodeSize[i]) * sizeof(edge_t), cudaMemcpyHostToDevice));
+        
         gpuErrorcheck(cudaMemcpy((void*)( graph_view.indices_), host_ptr_egdeList + partitioner.fromEdge[i], partitioner.partitionEdgeSize[i] * sizeof(vertex_t), cudaMemcpyHostToDevice));
         
         uint* extra_ele;
-        
-        /*if(i < partitioner.numPartitions-1){
+       //if(i < partitioner.numPartitions-1){
           extra_ele = new uint[1];
+          gpuErrorcheck((cudaMalloc(&graph_view.offsets_, (partitioner.partitionNodeSize[i]+1)*sizeof(edge_t))));
+          gpuErrorcheck(cudaMemcpy((void*)graph_view.offsets_, (void*)(subgraph.activeNodesPointer + partitioner.fromNode[i]), (partitioner.partitionNodeSize[i]) * sizeof(edge_t), cudaMemcpyHostToDevice));
           int ele = partitioner.fromNode[i] + partitioner.partitionNodeSize[i] - 1;
           extra_ele[0] = subgraph.activeNodesPointer[ele] + bfs_graph.outDegree[subgraph.activeNodes[ele]];
-          gpuErrorcheck(cudaMemcpy((void*)( graph_view.offsets_ + partitioner.partitionNodeSize[i]), (void*)extra_ele, sizeof(vertex_t), cudaMemcpyHostToDevice));
-        }*/
+         gpuErrorcheck(cudaMemcpy((void*)( graph_view.offsets_ + partitioner.partitionNodeSize[i]), (void*)extra_ele, sizeof(vertex_t), cudaMemcpyHostToDevice));
+      // }
+      /* else{
+        gpuErrorcheck((cudaMalloc(&graph_view.offsets_, (partitioner.partitionNodeSize[i])*sizeof(edge_t))));
+          gpuErrorcheck(cudaMemcpy((void*)graph_view.offsets_, (void*)(subgraph.activeNodesPointer + partitioner.fromNode[i]), (partitioner.partitionNodeSize[i]) * sizeof(edge_t), cudaMemcpyHostToDevice));
+       }*/
+
+      //gpuErrorcheck((cudaMalloc(&graph_view.offsets_, (partitioner.partitionNodeSize[i])*sizeof(edge_t))));
+      //gpuErrorcheck(cudaMemcpy((void*)graph_view.offsets_, (void*)(subgraph.activeNodesPointer + partitioner.fromNode[i]), (partitioner.partitionNodeSize[i]) * sizeof(edge_t), cudaMemcpyHostToDevice));
+
 
         hr_timer.stop();
     
         cudaMemcpy((void*)(host_label1), bfs_graph.d_label1, bfs_graph.num_nodes*sizeof(bool), cudaMemcpyDeviceToHost);
-        
-        for(int j=0;j<bfs_graph.num_nodes;j++){
-          if(host_label1[j])
-            vis.push_back(j);
+        int co = 0;
+        for(int j=partitioner.fromNode[i];j<(partitioner.fromNode[i]+partitioner.partitionNodeSize[i]);j++){
+          if(host_label1[subgraph.activeNodes[j]]){
+            vis.push_back(subgraph.activeNodes[j]);
+          }
         }
+
         cout<<"Activate ****************** nodes "<<vis.size()<<" "<<vis[0]<<"\n";
-        if(!vis.size()) break;
+      //  cout<<"Number of nodes in visted array "<<vis.size()<<"\n";
+        if(!vis.size()) {
+          continue;
+        }
 
         auto d_source = cugraph::test::to_device(handle, vis);
-        graph_view.set_number_of_vertices((size_t)partitioner.partitionNodeSize[i]);
-        graph_view.set_number_of_edges((size_t)partitioner.partitionEdgeSize[i]);
+      //  graph_view.set_number_of_vertices((size_t)partitioner.partitionNodeSize[i]);
+      //  graph_view.set_number_of_edges((size_t)partitioner.partitionEdgeSize[i]);
         int tot = bfs_graph.num_nodes;
+        
         cugraph::bfs_subway(handle,
                   graph_view,
                   d_distances.data(),
@@ -331,18 +376,39 @@ class Tests_BFS : public ::testing::TestWithParam<std::tuple<cugraph::test::BFS_
                   );
         cudaDeviceSynchronize();
         gpuErrorcheck( cudaPeekAtLastError() );
-        memset(host_sub_vertex, -1, sizeof(host_sub_vertex));
+        for(int j=partitioner.fromNode[i];j<(partitioner.fromNode[i]+partitioner.partitionNodeSize[i]);j++){
+         // cout<<subgraph.activeNodes[j]<<" "<<j-partitioner.fromNode[i]<<"\n";
+          host_sub_vertex[subgraph.activeNodes[j]] = -1;
+          subgraph.activeNodesPointer[j] += partitioner.fromEdge[i];
+        }
         vis.clear();
         d_source.release();
         device_mapSubvertex.release();
         
       }
+      cout<<"Finished inner loop of partition\n";
       subgen.generate(bfs_graph, subgraph);
 
+     /* cout<<"active nodes: "<<subgraph.numActiveNodes<<"\n";
+      for(int i=0;i<subgraph.numActiveNodes;i++){
+        cout<<subgraph.activeNodes[i]<<" ";
+      }
+      cout<<"\n";*/
     }
 
       hr_timer.stop();
       hr_timer.display_and_clear(std::cout);
+      std::ofstream fout; 
+      std::vector<vertex_t> h_cugraph_distances{};
+      std::vector<vertex_t> h_cugraph_predecessors{};
+      h_cugraph_distances    = cugraph::test::to_host(handle, d_distances);
+      h_cugraph_predecessors = cugraph::test::to_host(handle, d_predecessors);
+      fout.open("bfs_cugraph.txt"); 
+      for(vertex_t i : h_cugraph_distances) fout << i << "\n"; 
+      fout.close();
+      fout.open("bfs_cugraph_pred.txt");
+      for(vertex_t i : h_cugraph_predecessors) fout << i << "\n";
+      fout.close();
 
     }
     else{
@@ -368,9 +434,11 @@ class Tests_BFS : public ::testing::TestWithParam<std::tuple<cugraph::test::BFS_
 
     //fout.close();
     
-    /*ASSERT_TRUE(static_cast<vertex_t>(bfs_usecase.source) >= 0 &&
+    ASSERT_TRUE(static_cast<vertex_t>(bfs_usecase.source) >= 0 &&
                 static_cast<vertex_t>(bfs_usecase.source) < graph_view.number_of_vertices())
-      << "Invalid starting source.";*/
+      << "Invalid starting source.";
+
+    cout<<"Check correctness "<<bfs_usecase.check_correctness<<"\n";
 
     if (bfs_usecase.check_correctness) {
       cugraph::graph_t<vertex_t, edge_t, false, false> unrenumbered_graph(handle);
@@ -425,6 +493,14 @@ class Tests_BFS : public ::testing::TestWithParam<std::tuple<cugraph::test::BFS_
       } else {
         h_cugraph_distances    = cugraph::test::to_host(handle, d_distances);
         h_cugraph_predecessors = cugraph::test::to_host(handle, d_predecessors);
+      }
+      cout<<"Compare\n";
+      for(int i=0;i<h_reference_distances.size();i++)
+      {
+        if(h_cugraph_distances[i]!=h_reference_distances[i])
+        {
+          cout<<i<<" "<<h_cugraph_distances[i]<<" "<<h_reference_distances[i]<<"\n";
+        }
       }
 
       ASSERT_TRUE(std::equal(
@@ -516,4 +592,5 @@ INSTANTIATE_TEST_SUITE_P(
     std::make_pair(BFS_Usecase{0, false},
                    cugraph::test::Rmat_Usecase(20, 32, 0.57, 0.19, 0.19, 0, false, false))));
 */
+
 CUGRAPH_TEST_PROGRAM_MAIN()

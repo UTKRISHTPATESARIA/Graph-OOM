@@ -191,7 +191,10 @@ void update_v_frontier(raft::handle_t const& handle,
                        // value is updated by multiple @p v_op invocations with the same vertex ID.
                        VertexValueOutputIterator vertex_value_output_first,
                        VertexOp v_op,
-                       bool do_expensive_check = false)
+                       int *subVertex = nullptr,
+                       bool *label = nullptr,
+                       bool do_expensive_check = false
+                       )
 {
   using vertex_t = typename GraphViewType::vertex_type;
   using key_t =
@@ -272,30 +275,79 @@ void update_v_frontier(raft::handle_t const& handle,
                         v_op,
                         graph_view.local_vertex_partition_range_first()}
                         );
+    cudaDeviceSynchronize();
 
     resize_dataframe_buffer(payload_buffer, size_t{0}, handle.get_stream());
     shrink_to_fit_dataframe_buffer(payload_buffer, handle.get_stream());
+    
+    //int increment_ele = 0;
+    std::vector<int> v;
+
+    auto new_key_buffer = thrust::remove_if(
+    handle.get_thrust_policy(),
+    key_buffer.begin(),
+    key_buffer.end(),
+      [subVertex, label] __device__ (auto v) {
+        printf("vertex=%d subVertex[v]=%d\n", v, subVertex[v], label[v]);
+        return (subVertex[v] == -1) || (label[v]==false);
+      }
+    );
+
+    int num_ele = new_key_buffer - key_buffer.begin();
+    //num_ele++;
+    /*if(num_ele == key_buffer.size()){
+      num_ele = 0;
+    }*/
+    //std::cout<<"elements: "<<num_ele<<"\n";
+    //int ele = sizeof(new_key_buffer)/sizeof(new_key_buffer[0]);
+   /* std::cout<<"Filtered elements size "<<key_buffer.size()<<"\n";*/
+   /* vertex_t *new_arr = new vertex_t[1];
+    vertex_t *filtered_arr = new vertex_t[1];
+    cudaMemcpy((void*)new_arr, (void*)new_key_buffer,(1)*sizeof(vertex_t),cudaMemcpyDeviceToHost );
+    cudaMemcpy((void*)filtered_arr, (void*)key_buffer.begin(),(1)*sizeof(vertex_t),cudaMemcpyDeviceToHost );*/
+   // vertex_t *host_bucket_indices = new vertex_t[bucket_indices.size()];
+   // cudaMemcpy((void *)host_bucket_indices, (void *)bucket_indices.begin(), bucket_indices.size() * sizeof(vertex_t), cudaMemcpyDeviceToHost);
+    
+   /* std::cout<<"Filtered Elements\n"; 
+    for(int i=0;i<1;i++){
+        std::cout<<new_arr[i]<<" ";
+    }
+    std::cout<<"\n";
+    
+    std::cout<<"Filtered Elements keybuffer\n"; 
+    for(int i=0;i<1;i++){
+        std::cout<<filtered_arr[i]<<" ";
+    }
+    std::cout<<"\n";
+    */
+
+
+    resize_dataframe_buffer(key_buffer, num_ele, handle.get_stream());
+    resize_dataframe_buffer(bucket_indices, num_ele, handle.get_stream()); 
 
     auto bucket_key_pair_first = thrust::make_zip_iterator(
       thrust::make_tuple(bucket_indices.begin(), get_dataframe_buffer_begin(key_buffer)));
     bucket_indices.resize(
       thrust::distance(bucket_key_pair_first,
-                       thrust::remove_if(handle.get_thrust_policy(),
-                                         bucket_key_pair_first,
-                                         bucket_key_pair_first + bucket_indices.size(),
-                                         detail::check_invalid_bucket_idx_t<key_t>())),
+                      thrust::remove_if(handle.get_thrust_policy(),
+                                        bucket_key_pair_first,
+                                        bucket_key_pair_first + bucket_indices.size(),
+                                        detail::check_invalid_bucket_idx_t<key_t>())),
       handle.get_stream());
     resize_dataframe_buffer(key_buffer, bucket_indices.size(), handle.get_stream());
     bucket_indices.shrink_to_fit(handle.get_stream());
     shrink_to_fit_dataframe_buffer(key_buffer, handle.get_stream());
 
     frontier.insert_to_buckets(bucket_indices.begin(),
-                               bucket_indices.end(),
-                               get_dataframe_buffer_begin(key_buffer),
-                               next_frontier_bucket_indices);
+                              bucket_indices.end(),
+                              get_dataframe_buffer_begin(key_buffer),
+                              next_frontier_bucket_indices);
+
 
     resize_dataframe_buffer(key_buffer, 0, handle.get_stream());
     shrink_to_fit_dataframe_buffer(key_buffer, handle.get_stream());
+    //d_new_key_buffer.release();
+
   }
 }
 

@@ -316,7 +316,8 @@ transform_reduce_v_frontier_outgoing_e_by_dst(raft::handle_t const& handle,
                                               bool *label1 = nullptr,
                                               bool *label2 = nullptr,
                                               int* subVertex = nullptr,
-                                              const size_t size_ = 0
+                                              const size_t size_ = 0,
+                                              int nodes = 0
                                               )
 {
   static_assert(!GraphViewType::is_storage_transposed,
@@ -342,23 +343,8 @@ transform_reduce_v_frontier_outgoing_e_by_dst(raft::handle_t const& handle,
                       EdgeOp>
     e_op_wrapper{e_op};
 
-      /* bool *host_label1 = new bool[graph_view.number_of_vertices()];
-      bool *host_label2 = new bool[graph_view.number_of_vertices()];
+  //printf("Before extract\n");
 
-      cudaMemcpy((void*)(host_label1), label1, graph_view.number_of_vertices()*sizeof(bool), cudaMemcpyDeviceToHost);
-      cudaMemcpy((void*)(host_label2), label2, graph_view.number_of_vertices()*sizeof(bool), cudaMemcpyDeviceToHost);
-
-      std::cout<<"Label array from transform reduce\n";
-      for(int i=0;i<graph_view.number_of_vertices();i++){
-        std::cout<<host_label1[i]<<" ";
-      }
-      std::cout<<"\n";
-
-      for(int i=0;i<graph_view.number_of_vertices();i++){
-        std::cout<<host_label2[i]<<" ";
-      }
-      std::cout<<"\n"; */
-  printf("Before extract\n");
   auto [key_buffer, payload_buffer] =
     detail::extract_transform_v_frontier_e<false, key_t, payload_t>(handle,
                                                                     graph_view,
@@ -371,16 +357,17 @@ transform_reduce_v_frontier_outgoing_e_by_dst(raft::handle_t const& handle,
                                                                     label1,
                                                                     label2,
                                                                     subVertex,
-                                                                    size_
+                                                                    size_,
+                                                                    nodes
                                                                     );
-  printf("After extract\n");
+  //printf("After extract\n");
 
   // 2. reduce the buffer
 
   std::tie(key_buffer, payload_buffer) =
     detail::sort_and_reduce_buffer_elements<key_t, payload_t, ReduceOp>(
       handle, std::move(key_buffer), std::move(payload_buffer), reduce_op);
-
+  printf("Sorting done\n");
   if constexpr (GraphViewType::is_multi_gpu) {
 
     // FIXME: this step is unnecessary if row_comm_size== 1

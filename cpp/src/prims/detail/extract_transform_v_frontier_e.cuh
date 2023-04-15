@@ -37,6 +37,7 @@
 #include <rmm/exec_policy.hpp>
 
 #include <cub/cub.cuh>
+
 #include <thrust/binary_search.h>
 #include <thrust/copy.h>
 #include <thrust/count.h>
@@ -48,6 +49,11 @@
 #include <thrust/sort.h>
 #include <thrust/tuple.h>
 #include <thrust/device_vector.h>
+#include <thrust/detail/config.h>
+#include <thrust/detail/functional/argument.h>
+#include <thrust/detail/type_deduction.h>
+#include <thrust/detail/type_traits.h>
+#include <thrust/type_traits/void_t.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -61,7 +67,7 @@ namespace cugraph {
 
 namespace detail {
 
-int32_t constexpr extract_transform_v_frontier_e_kernel_block_size = 512;
+int32_t constexpr extract_transform_v_frontier_e_kernel_block_size = 1024;
 
 // we cannot use thrust::iterator_traits<Iterator>::value_type if Iterator is void* (reference to
 // void is not allowed)
@@ -406,6 +412,7 @@ __global__ void extract_transform_v_frontier_e_low_degree(
     edge_t local_degree{0};
     vertex_t idx_ = -1;
     if (lane_id < static_cast<int32_t>(max_key_idx - min_key_idx)) {
+      
       auto key = *(key_first + idx);
       
       vertex_t major{};
@@ -417,22 +424,26 @@ __global__ void extract_transform_v_frontier_e_low_degree(
       
       idx_ = subVertex[major];
       
-      //printf("major=%d subvertex[major]%d\n",major, idx_);
-      if(idx_ == -1){
-       // printf("Hello idx is greater");
+      /*if(idx_ == -1){
         idx += gridDim.x * blockDim.x;
         continue;
+      }*/
+
+      if(label1[major] == false){
+        idx_ = -1;
       }
-      
-
-      if(label1){
+     /* if(label1){
           label1[major] = false;
-        } 
-
+        }*/ 
+      
       auto major_offset = edge_partition.major_offset_from_major_nocheck(idx_);
-      local_degree      = edge_partition.local_degree(major_offset);
-      warp_key_local_edge_offsets[threadIdx.x] = edge_partition.local_offset(major_offset);
+      local_degree      = (idx_ == -1) ? 0 : edge_partition.local_degree(major_offset);
+      if(local_degree==0)
+        label1[major] = false;
+      warp_key_local_edge_offsets[threadIdx.x] = (idx_ == -1) ? 0 :edge_partition.local_offset(major_offset);
+    //  printf("major=%d, local_degree=%d, warp_key_local_edge_offsets=%d, index=%d\n", major, local_degree, warp_key_local_edge_offsets[threadIdx.x], idx_);
     }
+
     WarpScan(temp_storage)
       .InclusiveSum(local_degree, warp_local_degree_inclusive_sums[threadIdx.x]);
     __syncwarp();
@@ -446,7 +457,6 @@ __global__ void extract_transform_v_frontier_e_low_degree(
       raft::warp_size();
     for (size_t i = lane_id; i < rounded_up_num_edges_this_warp; i += raft::warp_size()) {
       e_op_result_t e_op_result{};
-      int ignore = 0;
       if (i < static_cast<size_t>(num_edges_this_warp)) {
         auto key_idx_this_warp = static_cast<vertex_t>(thrust::distance(
           warp_local_degree_inclusive_sums + warp_id * raft::warp_size(),
@@ -462,6 +472,7 @@ __global__ void extract_transform_v_frontier_e_low_degree(
                                  ? edge_t{0}
                                  : warp_local_degree_inclusive_sums[warp_id * raft::warp_size() +
                                                                     key_idx_this_warp - 1]));
+       // printf("local_edge_offset=%d, local_degree=%d\n", local_edge_offset,local_degree );
         auto key = *(key_first + (min_key_idx + key_idx_this_warp));
         vertex_t major{};
         if constexpr (std::is_same_v<key_t, vertex_t>) {
@@ -469,79 +480,87 @@ __global__ void extract_transform_v_frontier_e_low_degree(
         } else {
           major = thrust::get<0>(key);
         }
-        if(label1){
-          label1[major]=false;
-          dup_src = major;
-        } 
-        int minor_idx = 0;
-        auto minor  = indices[local_edge_offset];
-       // printf("in for loop major=%d minor=%d\n", major, minor);
-        
-        auto major_offset = edge_partition.major_offset_from_major_nocheck(idx_);
-        auto minor_offset = edge_partition.minor_offset_from_minor_nocheck(subVertex[minor]);
-        std::conditional_t<GraphViewType::is_storage_transposed, vertex_t, key_t>
-          key_or_src{};  // key if major
-        std::conditional_t<GraphViewType::is_storage_transposed, key_t, vertex_t>
-          key_or_dst{};  // key if major
-        if constexpr (GraphViewType::is_storage_transposed) {
-          key_or_src = minor;
-          key_or_dst = key;
-          
-        } else {
-          key_or_src = key;
-          key_or_dst = minor;
-          
-        }
-        
+        if(subVertex[major] != -1){
+          auto minor  = indices[local_edge_offset];
 
-          auto src_offset = GraphViewType::is_storage_transposed ? minor_offset : major_offset;
-          auto dst_offset = GraphViewType::is_storage_transposed ? major_offset : minor_offset;
-          e_op_result     = e_op(key_or_src,
-                            key_or_dst,
-                            edge_partition_src_value_input.get(src_offset),
-                            edge_partition_dst_value_input.get(dst_offset),
-                            edge_partition_e_value_input.get(local_edge_offset)
-                              );
-        if(e_op_result.has_value()){
-          if(label1 && key_or_dst != dup_src){
-            label2[key_or_dst] = true;
+        // printf("in for loop major=%d minor=%d subVertex[major]=%d subVertex[minor]=%d \n", major, minor, subVertex[major], subVertex[minor]);
+          
+          auto major_offset = edge_partition.major_offset_from_major_nocheck(subVertex[major]);
+          auto minor_offset = edge_partition.minor_offset_from_minor_nocheck(subVertex[minor]);
+          std::conditional_t<GraphViewType::is_storage_transposed, vertex_t, key_t>
+            key_or_src{};  // key if major
+          std::conditional_t<GraphViewType::is_storage_transposed, key_t, vertex_t>
+            key_or_dst{};  // key if major
+          if constexpr (GraphViewType::is_storage_transposed) {
+            key_or_src = minor;
+            key_or_dst = key;
+            
+          } else {
+            key_or_src = key;
+            key_or_dst = minor;
+            
           }
+
+          if(label1[major] == false){
+            //printf("label1[major] is false?????\n");
+            continue; 
+          }
+          else{
+            label1[major] = false;
+          }
+
+            auto src_offset = GraphViewType::is_storage_transposed ? minor_offset : major_offset;
+            auto dst_offset = GraphViewType::is_storage_transposed ? major_offset : minor_offset;
+          // printf("major=%d minor=%d\n", major, minor);
+            e_op_result     = e_op(key_or_src,
+                              key_or_dst,
+                              edge_partition_src_value_input.get(src_offset),
+                              edge_partition_dst_value_input.get(dst_offset),
+                              edge_partition_e_value_input.get(local_edge_offset)
+                                );
+
+            //printf("has_value=%d\n", e_op_result.has_value());
+            //printf("src=%d dst%d\n", );
+            /*if(e_op_result.has_value()){
+            if(label1 && key_or_dst != dup_src){
+                label2[key_or_dst] = true;  
+              }
+            }*/
         }
-        //  printf("Processing for minor=%d done\n", key_or_dst);
-      //}
+
+
       }
-      //We need to clear e_op_result for the vertices we need to ignore, also the if-condition needs to be modified for UVM case.
-      //if(ind_dst < partition_size){
-      
+
       auto ballot = __ballot_sync(uint32_t{0xffffffff}, e_op_result ? uint32_t{1} : uint32_t{0});
       
-      if (ballot > 0) {
-        if (lane_id == 0) {
-          auto increment = __popc(ballot);
-          static_assert(sizeof(unsigned long long int) == sizeof(size_t));
-          buffer_warp_start_indices[warp_id] =
-            static_cast<size_t>(atomicAdd(reinterpret_cast<unsigned long long int*>(buffer_idx_ptr),
-                                          static_cast<unsigned long long int>(increment)));
-        }
-        __syncwarp();
-        
-          if (e_op_result) {
-            auto buffer_warp_offset =
-              static_cast<edge_t>(__popc(ballot & ~(uint32_t{0xffffffff} << lane_id)));
-              
+        if (ballot > 0) {
+          if (lane_id == 0) {
+            auto increment = __popc(ballot);
+            static_assert(sizeof(unsigned long long int) == sizeof(size_t));
+            buffer_warp_start_indices[warp_id] =
+              static_cast<size_t>(atomicAdd(reinterpret_cast<unsigned long long int*>(buffer_idx_ptr),
+                                            static_cast<unsigned long long int>(increment)));
+          }
+          __syncwarp();
+          
+            if (e_op_result) {
+              auto buffer_warp_offset =
+                static_cast<edge_t>(__popc(ballot & ~(uint32_t{0xffffffff} << lane_id)));
+                
             push_buffer_element(e_op_result,
-                                buffer_key_output_first,
-                                buffer_value_output_first,
-                                buffer_warp_start_indices[warp_id] + buffer_warp_offset
-                                );
-              }
-        
-      }
+                                  buffer_key_output_first,
+                                  buffer_value_output_first,
+                                  buffer_warp_start_indices[warp_id] + buffer_warp_offset
+                                  );
+            }
+          
+        }
       
     }
 
     idx += gridDim.x * blockDim.x;
   }
+ // printf("Finshed extract function\n");
 }
 
 template <typename GraphViewType,
@@ -782,7 +801,8 @@ extract_transform_v_frontier_e(raft::handle_t const& handle,
                                bool *label1 = nullptr,
                                bool *label2 = nullptr,
                                int* subVertex = nullptr,
-                               const size_t size_ = 0
+                               const size_t size_ = 0,
+                               int total_nodes = 0
                                )
 {
   using vertex_t       = typename GraphViewType::vertex_type;
@@ -838,24 +858,7 @@ extract_transform_v_frontier_e(raft::handle_t const& handle,
                                                          thrust::optional<output_key_t>,
                                                          thrust::optional<output_value_t>>>>);
 
-
-  /* bool *host_label1 = new bool[graph_view.number_of_vertices()];
-      bool *host_label2 = new bool[graph_view.number_of_vertices()];
-
-      cudaMemcpy((void*)(host_label1), label1, graph_view.number_of_vertices()*sizeof(bool), cudaMemcpyDeviceToHost);
-      cudaMemcpy((void*)(host_label2), label2, graph_view.number_of_vertices()*sizeof(bool), cudaMemcpyDeviceToHost);
-
-      std::cout<<"Label array from extract reduce\n";
-      for(int i=0;i<graph_view.number_of_vertices();i++){
-        std::cout<<host_label1[i]<<" ";
-      }
-      std::cout<<"\n";
-
-      for(int i=0;i<graph_view.number_of_vertices();i++){
-        std::cout<<host_label2[i]<<" ";
-      }
-      std::cout<<"\n"; */
-  printf("Beforew do expensive check extrct file\n");
+ //printf("Beforew do expensive check extrct file\n");
   if (do_expensive_check) {
     vertex_t const* frontier_vertex_first{nullptr};
     vertex_t const* frontier_vertex_last{nullptr};
@@ -918,7 +921,7 @@ extract_transform_v_frontier_e(raft::handle_t const& handle,
   }
 
   for (size_t i = 0; i < graph_view.number_of_local_edge_partitions(); ++i) {
-    printf("Line 895 extract\n");
+    //printf("Line 895 extract\n");
     auto edge_partition =
         edge_partition_device_view_t<vertex_t, edge_t, GraphViewType::is_multi_gpu>(
         graph_view.local_edge_partition_view(i));
@@ -926,6 +929,7 @@ extract_transform_v_frontier_e(raft::handle_t const& handle,
     auto edge_partition_frontier_key_buffer =
       allocate_dataframe_buffer<key_t>(size_t{0}, handle.get_stream());
     vertex_t edge_partition_frontier_size  = static_cast<vertex_t>(local_frontier_sizes[i]);
+   // std::cout<<"local frontier size ----------- "<<local_frontier_sizes[i]<<"\n";
     auto edge_partition_frontier_key_first = frontier_key_first;
     auto edge_partition_frontier_key_last  = frontier_key_last;
     if constexpr (GraphViewType::is_multi_gpu) {
@@ -962,7 +966,7 @@ extract_transform_v_frontier_e(raft::handle_t const& handle,
         thrust::get<0>(edge_partition_frontier_key_last.get_iterator_tuple());
 
     }
-    printf("Line 939\n");
+   // printf("Line 939\n");
     auto segment_offsets = graph_view.local_edge_partition_segment_offsets(i);
    
     auto max_pushes   = edge_partition.compute_number_of_edges(
@@ -972,14 +976,14 @@ extract_transform_v_frontier_e(raft::handle_t const& handle,
       subVertex,
       size_);
     std::cout<<"max_pushes "<<max_pushes<<"\n";
-    printf("Line 945\n");
+   // printf("Line 945\n");
     auto new_buffer_size = buffer_idx.value(handle.get_stream()) + max_pushes;
 
     resize_optional_dataframe_buffer<output_key_t>(
       key_buffer, new_buffer_size, handle.get_stream());
     resize_optional_dataframe_buffer<output_value_t>(
       value_buffer, new_buffer_size, handle.get_stream());
-    printf("Line 952\n");
+    //printf("Line 952\n");
     edge_partition_src_input_device_view_t edge_partition_src_value_input{};
     edge_partition_dst_input_device_view_t edge_partition_dst_value_input{};
     if constexpr (GraphViewType::is_storage_transposed) {
@@ -987,7 +991,7 @@ extract_transform_v_frontier_e(raft::handle_t const& handle,
       edge_partition_dst_value_input =
         edge_partition_dst_input_device_view_t(edge_dst_value_input, i);
     } else {
-      printf("Line 960\n");
+     // printf("Line 960\n");
       edge_partition_src_value_input =
         edge_partition_src_input_device_view_t(edge_src_value_input, i);
       edge_partition_dst_value_input = edge_partition_dst_input_device_view_t(edge_dst_value_input);
@@ -995,7 +999,7 @@ extract_transform_v_frontier_e(raft::handle_t const& handle,
     auto edge_partition_e_value_input = edge_partition_e_input_device_view_t(edge_value_input, i);
 
     if (segment_offsets) {
-      printf("segment offset\n");
+     // printf("segment offset\n");
       static_assert(num_sparse_segments_per_vertex_partition == 3);
       std::vector<vertex_t> h_thresholds(num_sparse_segments_per_vertex_partition +
                                          (graph_view.use_dcs() ? 1 : 0) - 1);
@@ -1093,8 +1097,8 @@ extract_transform_v_frontier_e(raft::handle_t const& handle,
       }
     } else {
       if (edge_partition_frontier_size > 0) {
-        printf("Before low\n");
-        std::cout<<"size_ "<<size_<<"\n";
+      //  printf("Before low\n");
+      //  std::cout<<"size_ "<<size_<<"\n";
         raft::grid_1d_thread_t update_grid(edge_partition_frontier_size,
                                            extract_transform_v_frontier_e_kernel_block_size,
                                            handle.get_device_properties().maxGridSize[0]);
@@ -1114,27 +1118,27 @@ extract_transform_v_frontier_e(raft::handle_t const& handle,
             label2,
             subVertex,
             size_,
-            graph_view.number_of_vertices()
+            total_nodes
             );
           
-          printf("Returned from low\n");
+        printf("Returned from low\n");
       }
     }
   }
-  printf("Finished for loop in extract\n");
+  //printf("Finished for loop in extract\n");
   // 2. resize and return the buffers
   auto new_buffer_size = buffer_idx.value(handle.get_stream());
-  std::cout<<new_buffer_size<<"\n";
-  printf("Finished for loop 2 in extract\n");
+  //std::cout<<new_buffer_size<<"\n";
+  //printf("Finished for loop 2 in extract\n");
   resize_optional_dataframe_buffer<output_key_t>(key_buffer, new_buffer_size, handle.get_stream());
-  printf("Finished for loop 3 in extract\n");
+  //printf("Finished for loop 3 in extract\n");
   shrink_to_fit_optional_dataframe_buffer<output_key_t>(key_buffer, handle.get_stream());
-  printf("Finished for loop 4 in extract\n");
+  //printf("Finished for loop 4 in extract\n");
   resize_optional_dataframe_buffer<output_value_t>(
     value_buffer, new_buffer_size, handle.get_stream());
-   printf("Finished for loop5  in extract\n");
+  // printf("Finished for loop5  in extract\n");
   shrink_to_fit_optional_dataframe_buffer<output_value_t>(value_buffer, handle.get_stream());
-  printf("Finished for loop 6 in extract\n");
+  //printf("Finished for loop 6 in extract\n");
   return std::make_tuple(std::move(key_buffer), std::move(value_buffer));
 }
 

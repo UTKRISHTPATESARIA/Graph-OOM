@@ -832,6 +832,7 @@ struct DispatchReduce : SelectedPolicy
     else
     {
       // Regular size
+      printf("\nDeviceReduceKernel\n");
       return InvokePasses<ActivePolicyT>(
         DeviceReduceKernel<typename DispatchReduce::MaxPolicy,
                            InputIteratorT,
