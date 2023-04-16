@@ -154,6 +154,7 @@ std::optional<std::vector<T>> to_host(raft::handle_t const& handle,
 
 namespace detail {
 
+
 template <typename GraphViewType, typename PredecessorIterator>
 void bfs(raft::handle_t const& handle,
          GraphViewType const& push_graph_view,
@@ -170,7 +171,8 @@ void bfs(raft::handle_t const& handle,
          bool *label1 = nullptr,
          bool *label2 = nullptr,
          uint32_t* visited = nullptr,
-         int* subVertex = nullptr
+         int* subVertex = nullptr,
+         int *d_finished = nullptr
          )
 {
   using vertex_t = typename GraphViewType::vertex_type;
@@ -299,9 +301,6 @@ void bfs(raft::handle_t const& handle,
   //printf("Before BFS\n");
   // 4. BFS iteration
   vertex_t depth{0};
-  bool finished;
-	bool *d_finished;
-	cudaMalloc(&d_finished, sizeof(bool));
   while (true) {
     if (direction_optimizing) {
       CUGRAPH_FAIL("unimplemented.");
@@ -341,8 +340,8 @@ void bfs(raft::handle_t const& handle,
         e_op.prev_visited_flags = prev_visited_flags.data();
         // e_op.subway = true;
       }
-      //printf("depth=%d\n", depth);
-   //   printf("Before transform function\n");
+
+
       auto [new_frontier_vertex_buffer, predecessor_buffer] =
         transform_reduce_v_frontier_outgoing_e_by_dst(handle,
                                                       push_graph_view,
@@ -370,21 +369,32 @@ void bfs(raft::handle_t const& handle,
 #endif
                                                       reduce_op::any<vertex_t>(),
                                                       false,
-                                                      depth % 2 ? label2 : label1,
-                                                      depth % 2 ? label1 : label2,
+                                                      (depth % 2 ==1 ) ? label2 : label1,
+                                                      (depth % 2 ==1 ) ? label1 : label2,
                                                       subVertex,
                                                       num_vertices,
-                                                      nodes);
+                                                      vertex_frontier.bucket(bucket_idx_cur).aggregate_size());
 
-    /*std::cout<<"frontier: \n";
+   /*std::cout<<"frontier: \n";
     vertex_t *host_frontier = new vertex_t[new_frontier_vertex_buffer.size()];
     cudaMemcpy((void*)host_frontier, (void*)new_frontier_vertex_buffer.data(),new_frontier_vertex_buffer.size()*sizeof(vertex_t),cudaMemcpyDeviceToHost );
     for(int i=0;i<new_frontier_vertex_buffer.size();i++){
         std::cout<<host_frontier[i]<<" ";
     }
-    std::cout<<"\n";
+    std::cout<<"\n";*/
+    /*std::cout<<"After transform call finish size "<<predecessor_buffer.size()<<"\n";
+    std::cout<<"predecessors: \n";
+    vertex_t *host_pred = new vertex_t[predecessor_buffer.size()];
+    cudaMemcpy((void*)host_pred, (void*)predecessor_buffer.data(),predecessor_buffer.size()*sizeof(vertex_t),cudaMemcpyDeviceToHost );
+    for(int i=0;i<predecessor_buffer.size();i++){
+        if(host_frontier[i] == 20932678 && host_pred[i]==20904185){
+          std::cout<<"Why?? "<<host_pred[i]<<" "<<host_frontier[i]<<"\n";
+        }
+    }*/
+    //std::cout<<"\n";
 
-    bool *host_label = new bool[nodes];
+
+    /*bool *host_label = new bool[nodes];
     cudaMemcpy((void*)host_label, (void*)label1,nodes*sizeof(bool),cudaMemcpyDeviceToHost );
     for(int i=0;i<nodes;i++){
         std::cout<<host_label[i]<<" ";
@@ -396,14 +406,19 @@ void bfs(raft::handle_t const& handle,
     for(int i=0;i<nodes;i++){
         std::cout<<host_label2[i]<<" ";
     }
-    std::cout<<"\n";*/
+    std::cout<<"\n";
+*/
 
+   printf("After transform function\n");  
+   int *host_lock = new int[41652221];
+   for(int i=0;i<41652221;i++)
+    host_lock[i]=0;
 
-   printf("After transform function\n");
-  
-    finished = true;
+    int *lock;
+    cudaMalloc(&lock, sizeof(int)*41652221);
+    cudaMemcpy(lock, host_lock, sizeof(int)*41652221, cudaMemcpyHostToDevice);
+
     
-		cudaMemcpy(d_finished, &finished, sizeof(bool), cudaMemcpyHostToDevice);
     update_v_frontier(
       handle,
       push_graph_view,
@@ -420,31 +435,41 @@ void bfs(raft::handle_t const& handle,
           update ? thrust::optional<thrust::tuple<vertex_t, vertex_t>>{thrust::make_tuple(
                       distances[pushed_val] + 1, pushed_val)}
                   : thrust::nullopt);
-      },*/
-      [distances, predecessor_first, d_finished, label1, label2, depth] __device__(auto v, auto v_val, auto pushed_val) {
+      },
+      */
+      [distances, predecessor_first, d_finished, depth, lock] __device__(auto v, auto v_val, auto pushed_val) {
         //auto update = (v_val == invalid_distance);
        // printf("vertex in update op=%d\n", v);
         auto update = false;
-        auto to_compare_with = distances[pushed_val] + 1;
-        if(v_val > to_compare_with){
-          if(depth%2)
+       //while(atomicCAS(&lock[v], 0, 1)!=0);
+       // __threadfence();
+        auto dist = distances[pushed_val]+1;
+        if(distances[v] > dist){
+         /* if(depth%2){
             label1[v] = true;
-          else
+          }
+          else{
             label2[v] = true;
-          
-          // v_val = to_compare_with;
-          atomicMin(&v_val, to_compare_with);
-          *d_finished = false;
+          }*/
+
+          d_finished[0] = 0;
+          atomicMin((distances+v), dist); 
+          *(predecessor_first+v) = pushed_val;
           update = true;
         }
+       // __threadfence();
+       //atomicExch(&lock[v], 0);
+        //atomicExch(&lock[pushed_val], 0);
         return thrust::make_tuple(
           update ? thrust::optional<size_t>{bucket_idx_next} : thrust::nullopt,
           update ? thrust::optional<thrust::tuple<vertex_t, vertex_t>>{thrust::make_tuple(
-                       (vertex_t)v_val, pushed_val)}
+                       *(distances+v), pushed_val)}
                   : thrust::nullopt);
       },
-      subVertex
+      subVertex,
+      depth%2 ? label1:label2
       );
+
      // bool *host_label = new bool[nodes];
     /*cudaMemcpy((void*)host_label, (void*)label1,nodes*sizeof(bool),cudaMemcpyDeviceToHost );
     for(int i=0;i<nodes;i++){
@@ -463,14 +488,11 @@ void bfs(raft::handle_t const& handle,
       vertex_frontier.bucket(bucket_idx_cur).clear();
       vertex_frontier.bucket(bucket_idx_cur).shrink_to_fit();
       vertex_frontier.swap_buckets(bucket_idx_cur, bucket_idx_next);
-
+      //printf("after update op %d\n", (vertex_frontier.bucket(bucket_idx_cur).aggregate_size()));
       if (vertex_frontier.bucket(bucket_idx_cur).aggregate_size() == 0) {
         break; 
       }
-      cudaMemcpy(&finished, d_finished, sizeof(bool), cudaMemcpyDeviceToHost);
-      if(finished){
-        break;
-      }
+      
     }
 
     depth++;
@@ -524,6 +546,7 @@ void bfs(raft::handle_t const& handle,
                 0,
                 nullptr,
                 nullptr,
+                nullptr,
                 nullptr
                 );
   }
@@ -541,6 +564,7 @@ void bfs_subway(raft::handle_t const& handle,
          int* subVertex,
          int nodes,
          int vis_size,
+         int *d_finished,
          size_t n_sources,
          bool direction_optimizing,
          vertex_t depth_limit,
@@ -564,7 +588,8 @@ void bfs_subway(raft::handle_t const& handle,
                 label1,
                 label2,
                 visited,
-                subVertex
+                subVertex,
+                d_finished
                 );
   } else {
     detail::bfs(handle,
@@ -582,7 +607,8 @@ void bfs_subway(raft::handle_t const& handle,
                 label1,
                 label2,
                 visited,
-                subVertex
+                subVertex,
+                d_finished
                 );
   }
 }

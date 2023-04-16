@@ -83,6 +83,48 @@ template <typename vertex_t,
           typename VertexValueInputIterator,
           typename VertexValueOutputIterator,
           typename VertexOp,
+          typename key_t,
+          typename payload_t,
+          typename T>
+struct update_v_frontier_call_v_op_t_subway {
+  VertexValueInputIterator vertex_value_input_first{};
+  VertexValueOutputIterator vertex_value_output_first{};
+  VertexOp v_op{};
+  vertex_t local_vertex_partition_range_first{};
+  T label;
+
+  __device__ uint8_t operator()(thrust::tuple<key_t, payload_t> pair) const
+  {
+    auto key     = thrust::get<0>(pair);
+    auto payload = thrust::get<1>(pair);
+    vertex_t v_offset{};
+    if constexpr (std::is_same_v<key_t, vertex_t>) {
+      v_offset = key - local_vertex_partition_range_first;
+    } else {
+      v_offset = thrust::get<0>(key) - local_vertex_partition_range_first;
+    }
+    auto v_val       = *(vertex_value_input_first + v_offset);
+    auto v_op_result = v_op(key, v_val, payload);
+    if(thrust::get<1>(v_op_result)){
+      label[key] = true;
+    }
+    if (thrust::get<1>(v_op_result)) {
+      *(vertex_value_output_first + v_offset) = *(thrust::get<1>(v_op_result));
+    }
+    if (thrust::get<0>(v_op_result)) {
+      assert(*(thrust::get<0>(v_op_result)) < std::numeric_limits<uint8_t>::max());
+      return static_cast<uint8_t>(*(thrust::get<0>(v_op_result)));
+    } else {
+      return std::numeric_limits<uint8_t>::max();
+    }
+  }
+};
+
+
+template <typename vertex_t,
+          typename VertexValueInputIterator,
+          typename VertexValueOutputIterator,
+          typename VertexOp,
           typename key_t>
 struct update_v_frontier_call_v_op_t<vertex_t,
                                      VertexValueInputIterator,
@@ -220,67 +262,47 @@ void update_v_frontier(raft::handle_t const& handle,
     assert(frontier.num_buckets() <= std::numeric_limits<uint8_t>::max());
     rmm::device_uvector<uint8_t> bucket_indices(size_dataframe_buffer(key_buffer),
                                                 handle.get_stream());
-//
 
-    /*
-      0-> (1, [0])
-      1-> (2, [0])
-      100GB
-
-      10GB
-        200
-      10GB
-       -> 100-> (1,2,3,4......) --> (201 -> 1, 202 -> 2)
-
-
-       6 7 8
-       5 5 5
-
-         0  1  2  3  4  5  6      7 8 9 10 11 12 
-
-      1. -1 0  0  0  1  1  1   2. 5 6 5
-          5 6  5
-
-
-        10   11
-       0 9  9  0
-       2- > 1-> 10, 11 (9, 9)
-
-      1-> 1 -> 6,7,8 (5,5,5)
-
-       subvertex[5] subvertex[5] subvertex[5]
-    */
 
     auto key_payload_pair_first = thrust::make_zip_iterator(thrust::make_tuple(
       get_dataframe_buffer_begin(key_buffer), get_dataframe_buffer_begin(payload_buffer)));
-
-  /*1   2 3 4   5    6 7 8
-
-   6 5
-   7 5
-   8 5*/
 
     thrust::transform(handle.get_thrust_policy(),
                       key_payload_pair_first,
                       key_payload_pair_first + size_dataframe_buffer(key_buffer),
                       bucket_indices.begin(),
-                      detail::update_v_frontier_call_v_op_t<vertex_t,
+                     // label?
+                      detail::update_v_frontier_call_v_op_t_subway<vertex_t,
                                                             VertexValueInputIterator,
                                                             VertexValueOutputIterator,
                                                             VertexOp,
                                                             key_t,
-                                                            payload_t>{
+                                                            payload_t,
+                                                            bool*>{
                         vertex_value_input_first,
                         vertex_value_output_first,
                         v_op,
-                        graph_view.local_vertex_partition_range_first()}
+                        graph_view.local_vertex_partition_range_first(),
+                        label}
+                       /* :
+                        detail::update_v_frontier_call_v_op_t<vertex_t,
+                                                            VertexValueInputIterator,
+                                                            VertexValueOutputIterator,
+                                                            VertexOp,
+                                                            key_t,
+                                                            payload_t
+                                                            >{
+                        vertex_value_input_first,
+                        vertex_value_output_first,
+                        v_op,
+                        graph_view.local_vertex_partition_range_first()}*/
                         );
     cudaDeviceSynchronize();
+     cudaDeviceSynchronize();
 
     resize_dataframe_buffer(payload_buffer, size_t{0}, handle.get_stream());
     shrink_to_fit_dataframe_buffer(payload_buffer, handle.get_stream());
-    
-    //int increment_ele = 0;
+
     std::vector<int> v;
 
     auto new_key_buffer = thrust::remove_if(
@@ -288,53 +310,17 @@ void update_v_frontier(raft::handle_t const& handle,
     key_buffer.begin(),
     key_buffer.end(),
       [subVertex, label] __device__ (auto v) {
-        printf("vertex=%d subVertex[v]=%d\n", v, subVertex[v], label[v]);
+        printf("vertex=%d subVertex[v]=%d label[v]=%d\n", v, subVertex[v], label[v]); 
         return (subVertex[v] == -1) || (label[v]==false);
       }
     );
 
     int num_ele = new_key_buffer - key_buffer.begin();
-    //num_ele++;
-    /*if(num_ele == key_buffer.size()){
-      num_ele = 0;
-    }*/
-    //std::cout<<"elements: "<<num_ele<<"\n";
-    //int ele = sizeof(new_key_buffer)/sizeof(new_key_buffer[0]);
-   /* std::cout<<"Filtered elements size "<<key_buffer.size()<<"\n";*/
-   /* vertex_t *new_arr = new vertex_t[1];
-    vertex_t *filtered_arr = new vertex_t[1];
-    cudaMemcpy((void*)new_arr, (void*)new_key_buffer,(1)*sizeof(vertex_t),cudaMemcpyDeviceToHost );
-    cudaMemcpy((void*)filtered_arr, (void*)key_buffer.begin(),(1)*sizeof(vertex_t),cudaMemcpyDeviceToHost );*/
-   // vertex_t *host_bucket_indices = new vertex_t[bucket_indices.size()];
-   // cudaMemcpy((void *)host_bucket_indices, (void *)bucket_indices.begin(), bucket_indices.size() * sizeof(vertex_t), cudaMemcpyDeviceToHost);
-    
-   /* std::cout<<"Filtered Elements\n"; 
-    for(int i=0;i<1;i++){
-        std::cout<<new_arr[i]<<" ";
-    }
-    std::cout<<"\n";
-    
-    std::cout<<"Filtered Elements keybuffer\n"; 
-    for(int i=0;i<1;i++){
-        std::cout<<filtered_arr[i]<<" ";
-    }
-    std::cout<<"\n";
-    */
 
 
     resize_dataframe_buffer(key_buffer, num_ele, handle.get_stream());
     resize_dataframe_buffer(bucket_indices, num_ele, handle.get_stream()); 
 
-    auto bucket_key_pair_first = thrust::make_zip_iterator(
-      thrust::make_tuple(bucket_indices.begin(), get_dataframe_buffer_begin(key_buffer)));
-    bucket_indices.resize(
-      thrust::distance(bucket_key_pair_first,
-                      thrust::remove_if(handle.get_thrust_policy(),
-                                        bucket_key_pair_first,
-                                        bucket_key_pair_first + bucket_indices.size(),
-                                        detail::check_invalid_bucket_idx_t<key_t>())),
-      handle.get_stream());
-    resize_dataframe_buffer(key_buffer, bucket_indices.size(), handle.get_stream());
     bucket_indices.shrink_to_fit(handle.get_stream());
     shrink_to_fit_dataframe_buffer(key_buffer, handle.get_stream());
 

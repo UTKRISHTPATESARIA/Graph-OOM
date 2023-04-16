@@ -127,16 +127,16 @@ auto sort_and_reduce_buffer_elements(
   }
 
   if constexpr (std::is_same_v<payload_t, void>) {
-    auto it = thrust::unique(handle.get_thrust_policy(),
+    /*auto it = thrust::unique(handle.get_thrust_policy(),
                              get_dataframe_buffer_begin(key_buffer),
                              get_dataframe_buffer_end(key_buffer));
     resize_dataframe_buffer(
       key_buffer,
       static_cast<size_t>(thrust::distance(get_dataframe_buffer_begin(key_buffer), it)),
       handle.get_stream());
-    shrink_to_fit_dataframe_buffer(key_buffer, handle.get_stream());
+    shrink_to_fit_dataframe_buffer(key_buffer, handle.get_stream());*/
   } else if constexpr (std::is_same_v<ReduceOp, reduce_op::any<typename ReduceOp::value_type>>) {
-    auto it = thrust::unique_by_key(handle.get_thrust_policy(),
+   /* auto it = thrust::unique_by_key(handle.get_thrust_policy(),
                                     get_dataframe_buffer_begin(key_buffer),
                                     get_dataframe_buffer_end(key_buffer),
                                     get_optional_dataframe_buffer_begin<payload_t>(payload_buffer));
@@ -146,9 +146,9 @@ auto sort_and_reduce_buffer_elements(
                             handle.get_stream());
     resize_dataframe_buffer(payload_buffer, size_dataframe_buffer(key_buffer), handle.get_stream());
     shrink_to_fit_dataframe_buffer(key_buffer, handle.get_stream());
-    shrink_to_fit_dataframe_buffer(payload_buffer, handle.get_stream());
+    shrink_to_fit_dataframe_buffer(payload_buffer, handle.get_stream());*/
   } else {
-    auto num_uniques =
+   /* auto num_uniques =
       thrust::count_if(handle.get_thrust_policy(),
                        thrust::make_counting_iterator(size_t{0}),
                        thrust::make_counting_iterator(size_dataframe_buffer(key_buffer)),
@@ -169,7 +169,7 @@ auto sort_and_reduce_buffer_elements(
                           reduce_op);
 
     key_buffer     = std::move(new_key_buffer);
-    payload_buffer = std::move(new_payload_buffer);
+    payload_buffer = std::move(new_payload_buffer);*/
   }
 
   return std::make_tuple(std::move(key_buffer), std::move(payload_buffer));
@@ -360,10 +360,10 @@ transform_reduce_v_frontier_outgoing_e_by_dst(raft::handle_t const& handle,
                                                                     size_,
                                                                     nodes
                                                                     );
-  //printf("After extract\n");
+  printf("After extract\n");
 
   // 2. reduce the buffer
-
+  std::cout<<key_buffer.size()<<"\n";
   std::tie(key_buffer, payload_buffer) =
     detail::sort_and_reduce_buffer_elements<key_t, payload_t, ReduceOp>(
       handle, std::move(key_buffer), std::move(payload_buffer), reduce_op);
