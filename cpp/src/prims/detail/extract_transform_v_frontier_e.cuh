@@ -163,6 +163,7 @@ __device__ void push_buffer_element(e_op_result_t e_op_result,
 
   static_assert(!std::is_same_v<output_key_t, void> || !std::is_same_v<output_value_t, void>);
   if constexpr (!std::is_same_v<output_key_t, void> && !std::is_same_v<output_value_t, void>) {
+
     *(buffer_key_output_first + buffer_idx)   = thrust::get<0>(*e_op_result);
     *(buffer_value_output_first + buffer_idx) = thrust::get<1>(*e_op_result);
   } else if constexpr (!std::is_same_v<output_key_t, void>) {
@@ -429,19 +430,21 @@ __global__ void extract_transform_v_frontier_e_low_degree(
         continue;
       }*/
 
-      if(label1[major] == false){
-        idx_ = -1;
-      }
-     /* if(label1){
+      if(label1){
+        if(label1[major] == false){
+          printf("RED FLAG\n");
+          idx_ = -1;
+        }
+        else{
           label1[major] = false;
-        }*/ 
+        }
+      } 
       
       auto major_offset = edge_partition.major_offset_from_major_nocheck(idx_);
       local_degree      = (idx_ == -1) ? 0 : edge_partition.local_degree(major_offset);
-      if(local_degree==0)
-        label1[major] = false;
       warp_key_local_edge_offsets[threadIdx.x] = (idx_ == -1) ? 0 :edge_partition.local_offset(major_offset);
-    //  printf("major=%d, local_degree=%d, warp_key_local_edge_offsets=%d, index=%d\n", major, local_degree, warp_key_local_edge_offsets[threadIdx.x], idx_);
+      if(major == 21365149)
+        printf("major=%d, local_degree=%d, warp_key_local_edge_offsets=%d, index=%d\n", major, local_degree, warp_key_local_edge_offsets[threadIdx.x], idx_);
     }
 
     WarpScan(temp_storage)
@@ -501,13 +504,8 @@ __global__ void extract_transform_v_frontier_e_low_degree(
             
           }
 
-          if(label1[major] == false){
-            //printf("label1[major] is false?????\n");
-            continue; 
-          }
-          else{
+
             label1[major] = false;
-          }
 
             auto src_offset = GraphViewType::is_storage_transposed ? minor_offset : major_offset;
             auto dst_offset = GraphViewType::is_storage_transposed ? major_offset : minor_offset;
@@ -518,14 +516,9 @@ __global__ void extract_transform_v_frontier_e_low_degree(
                               edge_partition_dst_value_input.get(dst_offset),
                               edge_partition_e_value_input.get(local_edge_offset)
                                 );
-
-            //printf("has_value=%d\n", e_op_result.has_value());
-            //printf("src=%d dst%d\n", );
-            /*if(e_op_result.has_value()){
-            if(label1 && key_or_dst != dup_src){
-                label2[key_or_dst] = true;  
-              }
-            }*/
+            if(major == 21365149){
+              printf("*****************major=%d minor=%d\n", major, minor);
+            }
         }
 
 
@@ -1128,7 +1121,7 @@ extract_transform_v_frontier_e(raft::handle_t const& handle,
   //printf("Finished for loop in extract\n");
   // 2. resize and return the buffers
   auto new_buffer_size = buffer_idx.value(handle.get_stream());
-  //std::cout<<new_buffer_size<<"\n";
+  std::cout<<new_buffer_size<<"\n";
   //printf("Finished for loop 2 in extract\n");
   resize_optional_dataframe_buffer<output_key_t>(key_buffer, new_buffer_size, handle.get_stream());
   //printf("Finished for loop 3 in extract\n");

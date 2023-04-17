@@ -104,7 +104,7 @@ struct update_v_frontier_call_v_op_t_subway {
       v_offset = thrust::get<0>(key) - local_vertex_partition_range_first;
     }
     auto v_val       = *(vertex_value_input_first + v_offset);
-    auto v_op_result = v_op(key, v_val, payload);
+    auto v_op_result = v_op(v_offset, v_val, payload);
     if(thrust::get<1>(v_op_result)){
       label[key] = true;
     }
@@ -310,13 +310,20 @@ void update_v_frontier(raft::handle_t const& handle,
     key_buffer.begin(),
     key_buffer.end(),
       [subVertex, label] __device__ (auto v) {
-        printf("vertex=%d subVertex[v]=%d label[v]=%d\n", v, subVertex[v], label[v]); 
+        //printf("vertex=%d subVertex[v]=%d label[v]=%d\n", v, subVertex[v], label[v]); 
         return (subVertex[v] == -1) || (label[v]==false);
       }
     );
 
     int num_ele = new_key_buffer - key_buffer.begin();
 
+    /*vertex_t *host_key_buffer = new vertex_t[num_ele];
+    cudaMemcpy(host_key_buffer, get_dataframe_buffer_begin(key_buffer), num_ele*(sizeof(vertex_t)), cudaMemcpyDeviceToHost);
+    std::cout<<"host key buffer after remove if\n";
+    for(int i=0;i<num_ele;i++){
+      std::cout<<host_key_buffer[i]<<" ";
+    }
+    std::cout<<"\n";*/
 
     resize_dataframe_buffer(key_buffer, num_ele, handle.get_stream());
     resize_dataframe_buffer(bucket_indices, num_ele, handle.get_stream()); 

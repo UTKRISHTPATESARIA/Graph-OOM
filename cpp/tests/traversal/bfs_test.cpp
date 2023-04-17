@@ -151,7 +151,7 @@ class Tests_BFS : public ::testing::TestWithParam<std::tuple<cugraph::test::BFS_
     hr_timer.start("Preprocessing");
     //free(graph);
     auto graph_view = graph.view();
-    //auto graph_view_copy = graph.view();
+    auto graph_view_copy = graph.view();
     /*rmm::mr::cuda_memory_resource cuda_resource;
       rmm::mr::set_current_device_resource(&cuda_resource);*/
      rmm::device_uvector<vertex_t> d_distances(graph_view.number_of_vertices(), handle.get_stream());
@@ -281,20 +281,20 @@ class Tests_BFS : public ::testing::TestWithParam<std::tuple<cugraph::test::BFS_
         host_ptr_egdeList[i] = subgraph.activeEdgeList[i].end;
       }
       std::cout<<"Number of partitions: "<<partitioner.numPartitions<<"\n";
-      //partitioner.numPartitions = 2;
+     // partitioner.numPartitions = 2;
       for(int i=0; i<partitioner.numPartitions; i++)
       { 
-       /* if(i==0){
+      /*  if(i==0){
           partitioner.fromNode[i] = 0;
-          partitioner.partitionNodeSize[i] = 2;
+          partitioner.partitionNodeSize[i] = 3;
           partitioner.fromEdge[i] = 0;
           partitioner.partitionEdgeSize[i] = 4;
         }
         else{
-          partitioner.fromNode[i] = 2;
-          partitioner.partitionNodeSize[i] = 9;
+          partitioner.fromNode[i] = 3;
+          partitioner.partitionNodeSize[i] = 4; 
           partitioner.fromEdge[i] = 4;
-          partitioner.partitionEdgeSize[i] = 8;
+          partitioner.partitionEdgeSize[i] = 3;
         }*/
         int *h_finished = new int[1];
 
@@ -308,10 +308,16 @@ class Tests_BFS : public ::testing::TestWithParam<std::tuple<cugraph::test::BFS_
         for(int j=partitioner.fromNode[i];j<(partitioner.fromNode[i]+partitioner.partitionNodeSize[i]);j++){
          // cout<<subgraph.activeNodes[j]<<" "<<j-partitioner.fromNode[i]<<"\n";
           host_sub_vertex[subgraph.activeNodes[j]] = j-partitioner.fromNode[i];
+          
           /*if(j==159 || j==160 || j==161 || j==162){
+            8 10 3 4
+            3 8 2 5 5
             cout<<"active edges "<<subgraph.activeNodesPointer[j]<<" "<<partitioner.fromEdge[i]<<"\n";
           }*/
+          
+          
           subgraph.activeNodesPointer[j] -= partitioner.fromEdge[i];
+         // cout<<subgraph.activeNodes[j]<<" "<< host_sub_vertex[subgraph.activeNodes[j]]<<" "<<subgraph.activeNodesPointer[j]<<"\n";
         }
         
         cudaMemcpy(device_mapSubvertex.data(), host_sub_vertex, bfs_graph.num_nodes * sizeof(int), cudaMemcpyHostToDevice);
@@ -328,7 +334,7 @@ class Tests_BFS : public ::testing::TestWithParam<std::tuple<cugraph::test::BFS_
         gpuErrorcheck((cudaMalloc(&graph_view.indices_, partitioner.partitionEdgeSize[i]*sizeof(vertex_t))));
         
         gpuErrorcheck(cudaMemcpy((void*)( graph_view.indices_), host_ptr_egdeList + partitioner.fromEdge[i], partitioner.partitionEdgeSize[i] * sizeof(vertex_t), cudaMemcpyHostToDevice));
-        
+
         uint* extra_ele;
 
           extra_ele = new uint[1];
@@ -336,7 +342,7 @@ class Tests_BFS : public ::testing::TestWithParam<std::tuple<cugraph::test::BFS_
           gpuErrorcheck(cudaMemcpy((void*)graph_view.offsets_, (void*)(subgraph.activeNodesPointer + partitioner.fromNode[i]), (partitioner.partitionNodeSize[i]) * sizeof(edge_t), cudaMemcpyHostToDevice));
           int ele = partitioner.fromNode[i] + partitioner.partitionNodeSize[i] - 1;
           extra_ele[0] = subgraph.activeNodesPointer[ele] + bfs_graph.outDegree[subgraph.activeNodes[ele]];
-         gpuErrorcheck(cudaMemcpy((void*)( graph_view.offsets_ + partitioner.partitionNodeSize[i]), (void*)extra_ele, sizeof(vertex_t), cudaMemcpyHostToDevice));
+         gpuErrorcheck(cudaMemcpy((void*)( graph_view.offsets_ + partitioner.partitionNodeSize[i]), (void*)extra_ele, sizeof(edge_t), cudaMemcpyHostToDevice));
 
         hr_timer.stop();
         do{
@@ -363,8 +369,8 @@ class Tests_BFS : public ::testing::TestWithParam<std::tuple<cugraph::test::BFS_
         }
 
         auto d_source = cugraph::test::to_device(handle, vis);
-        //graph_view.set_number_of_vertices((size_t)partitioner.partitionNodeSize[i]);
-        //graph_view.set_number_of_edges((size_t)partitioner.partitionEdgeSize[i]);
+        graph_view.set_number_of_vertices((size_t)partitioner.partitionNodeSize[i]);
+        graph_view.set_number_of_edges((size_t)partitioner.partitionEdgeSize[i]);
         int tot = bfs_graph.num_nodes;
         
         cugraph::bfs_subway(handle,
@@ -461,7 +467,7 @@ class Tests_BFS : public ::testing::TestWithParam<std::tuple<cugraph::test::BFS_
           cugraph::test::construct_graph<vertex_t, edge_t, weight_t, false, false>(
             handle, input_usecase, false, false);
       }
-      auto unrenumbered_graph_view = renumber ? unrenumbered_graph.view() : graph_view;
+      auto unrenumbered_graph_view = renumber ? unrenumbered_graph.view() : graph_view_copy;
 
       auto h_offsets = cugraph::test::to_host(
         handle, unrenumbered_graph_view.local_edge_partition_view().offsets());
@@ -517,30 +523,36 @@ class Tests_BFS : public ::testing::TestWithParam<std::tuple<cugraph::test::BFS_
             cout<<i<<" "<<h_cugraph_distances[i]<<" "<<h_reference_distances[i]<<"\n";
        }
       }
+     /*cout<<"Predecessors\n";
+      for(int i=0;i<h_reference_distances.size();i++){
+        if(h_cugraph_predecessors[i]!=h_reference_predecessors[i])
+        cout<<i<<" "<<h_cugraph_predecessors[i]<<" "<<h_reference_predecessors[i]<<"\n";
+      }
+      cout<<"\n";*/
 
-     /* int x = 6;
+      /*int x = 10557;
       int counter = 0;
-      cout<<"Looking at Predecessors GPU of 6\n";
+      cout<<"Looking at Predecessors GPU of 10557\n";
       while(x!=1){
         counter++;
         x = h_cugraph_predecessors[x];
         cout<<x<<" "<<h_cugraph_distances[x]<<" "<<h_reference_distances[x]<<"\n";
       } 
-      cout<<"Dist of 6 to 1 is="<<counter<<"\n";
+      cout<<"Dist of 10557 to 1 is="<<counter<<"\n";*/
 
-      x = 6;
-      counter = 0;
-      cout<<"Looking at Predecessors Ref of 6\n";
+      int x = 21365148;
+      int counter = 0;
+      cout<<"Looking at Predecessors Ref of 10557\n";
       while(x!=1){
         counter++;
         x = h_reference_predecessors[x];
         cout<<x<<" "<<h_cugraph_distances[x]<<" "<<h_reference_distances[x]<<"\n";
       } 
-      cout<<"Dist of 6 to 1 is="<<counter<<"\n";*/
+      cout<<"Dist of 10557 to 1 is="<<counter<<"\n";
 
-      /*ASSERT_TRUE(std::equal(
+      ASSERT_TRUE(std::equal(
         h_reference_distances.begin(), h_reference_distances.end(), h_cugraph_distances.begin()))
-        << "distances do not match with the reference values.";*/
+        << "distances do not match with the reference values.";
       for (auto it = h_cugraph_predecessors.begin(); it != h_cugraph_predecessors.end(); ++it) {
         auto i = std::distance(h_cugraph_predecessors.begin(), it);
         if (*it == cugraph::invalid_vertex_id<vertex_t>::value) {

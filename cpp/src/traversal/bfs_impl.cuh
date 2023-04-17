@@ -76,9 +76,12 @@ struct e_op_t {
     nullptr};  // relevant only if multi_gpu is false (this affects only local-computing with 0
                // impact in communication volume, so this may improve performance in small-scale but
                // will eat-up more memory with no benefit in performance in large-scale).
+  vertex_t* distances_d{};
   vertex_t dst_first{};  // relevant only if multi_gpu is true
+  
 
-  __device__ thrust::optional<vertex_t> operator()(
+  //__device__ thrust::optional<vertex_t> operator()(
+    __device__ thrust::optional<thrust::tuple<vertex_t, vertex_t>> operator()(
     vertex_t src, vertex_t dst, thrust::nullopt_t, thrust::nullopt_t, thrust::nullopt_t) const
   {
     /*bool push{};
@@ -98,7 +101,9 @@ struct e_op_t {
     }
     printf("push=%d\n", push);*/
     //return push ? thrust::optional<vertex_t>{src} : thrust::nullopt;
-    return thrust::optional<vertex_t>{src};
+    return thrust::optional<thrust::tuple<vertex_t, vertex_t>>{thrust::make_tuple(
+                    distances_d[src], src)};
+    //return thrust::optional<vertex_t>{src};
   }
 };
 
@@ -183,15 +188,27 @@ void bfs(raft::handle_t const& handle,
                 "GraphViewType should support the push model.");
 
   auto const num_vertices = push_graph_view.number_of_vertices();
+  auto const num_edges = push_graph_view.number_of_edges();
   //std::cout<<"Number of vertices in impl for partition "<<num_vertices<<"\n";
 
-  //int* host_subvertex = new int[num_vertices];
-  //cudaMemcpy((void*)host_subvertex, (void*)subVertex, nodes*sizeof(int), cudaMemcpyDeviceToHost);
-  /*std::cout<<"Host subvertex passed "<<num_vertices<<"\n";
-  for(int i=0;i<nodes;i++)
-    std::cout<<i<<" "<<host_subvertex[i]<<"\n";
+  int* host_offset = new int[num_vertices];
+  int* host_indices = new int[num_edges];
+  int* host_subVertex = new int[nodes];
+  cudaMemcpy((void*)host_offset, (void*)push_graph_view.offsets_, num_vertices*sizeof(int), cudaMemcpyDeviceToHost);
+  cudaMemcpy((void*)host_subVertex, (void*)subVertex, nodes*sizeof(int), cudaMemcpyDeviceToHost);
+  cudaMemcpy((void*)host_indices, (void*)push_graph_view.indices_, num_edges*sizeof(int), cudaMemcpyDeviceToHost);
+  std::cout<<"Host Indices passed "<<num_vertices<<"\n";
+  if(host_subVertex[21365149] != -1){
+    int pos = host_subVertex[21365149];
+    std::cout<<"###########\n";
+   // std::cout<<label1[21365149]<<"\n";
+    for(int i=host_offset[pos];i<host_offset[pos+1];i++){
+      std::cout<<host_indices[i]<<" ";
+    }
+    std::cout<<"\n";
+  }
 
-  std::cout<<"\n";*/
+  std::cout<<"\n";
 
   /*int* host_visited = new int[vis_size];
 
@@ -338,6 +355,7 @@ void bfs(raft::handle_t const& handle,
       } else {
         e_op.visited_flags      = label1 ? visited: visited_flags.data();
         e_op.prev_visited_flags = prev_visited_flags.data();
+        e_op.distances_d = distances;
         // e_op.subway = true;
       }
 
@@ -367,7 +385,8 @@ void bfs(raft::handle_t const& handle,
             return thrust::make_tuple(push, src);
           },
 #endif
-                                                      reduce_op::any<vertex_t>(),
+                                                      //reduce_op::any<vertex_t>(),
+                                                      reduce_op::minimum<thrust::tuple<vertex_t, vertex_t>>(),
                                                       false,
                                                       (depth % 2 ==1 ) ? label2 : label1,
                                                       (depth % 2 ==1 ) ? label1 : label2,
@@ -441,29 +460,28 @@ void bfs(raft::handle_t const& handle,
         //auto update = (v_val == invalid_distance);
        // printf("vertex in update op=%d\n", v);
         auto update = false;
-       //while(atomicCAS(&lock[v], 0, 1)!=0);
-       // __threadfence();
-        auto dist = distances[pushed_val]+1;
+       while(atomicCAS(&lock[v], 0, 1)!=0);
+        __threadfence();
+        auto pred = thrust::get<1>(pushed_val);
+        auto dist = distances[pred]+1;
         if(distances[v] > dist){
-         /* if(depth%2){
+          /*if(depth%2){
             label1[v] = true;
           }
           else{
             label2[v] = true;
           }*/
-
+          v_val = dist;
           d_finished[0] = 0;
-          atomicMin((distances+v), dist); 
-          *(predecessor_first+v) = pushed_val;
           update = true;
         }
-       // __threadfence();
-       //atomicExch(&lock[v], 0);
+        __threadfence();
+       atomicExch(&lock[v], 0);
         //atomicExch(&lock[pushed_val], 0);
         return thrust::make_tuple(
           update ? thrust::optional<size_t>{bucket_idx_next} : thrust::nullopt,
           update ? thrust::optional<thrust::tuple<vertex_t, vertex_t>>{thrust::make_tuple(
-                       *(distances+v), pushed_val)}
+                       v_val, pred)}
                   : thrust::nullopt);
       },
       subVertex,

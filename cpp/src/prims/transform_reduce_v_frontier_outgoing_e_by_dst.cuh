@@ -127,16 +127,16 @@ auto sort_and_reduce_buffer_elements(
   }
 
   if constexpr (std::is_same_v<payload_t, void>) {
-    /*auto it = thrust::unique(handle.get_thrust_policy(),
+    auto it = thrust::unique(handle.get_thrust_policy(),
                              get_dataframe_buffer_begin(key_buffer),
                              get_dataframe_buffer_end(key_buffer));
     resize_dataframe_buffer(
       key_buffer,
       static_cast<size_t>(thrust::distance(get_dataframe_buffer_begin(key_buffer), it)),
       handle.get_stream());
-    shrink_to_fit_dataframe_buffer(key_buffer, handle.get_stream());*/
+    shrink_to_fit_dataframe_buffer(key_buffer, handle.get_stream());
   } else if constexpr (std::is_same_v<ReduceOp, reduce_op::any<typename ReduceOp::value_type>>) {
-   /* auto it = thrust::unique_by_key(handle.get_thrust_policy(),
+    auto it = thrust::unique_by_key(handle.get_thrust_policy(),
                                     get_dataframe_buffer_begin(key_buffer),
                                     get_dataframe_buffer_end(key_buffer),
                                     get_optional_dataframe_buffer_begin<payload_t>(payload_buffer));
@@ -146,9 +146,10 @@ auto sort_and_reduce_buffer_elements(
                             handle.get_stream());
     resize_dataframe_buffer(payload_buffer, size_dataframe_buffer(key_buffer), handle.get_stream());
     shrink_to_fit_dataframe_buffer(key_buffer, handle.get_stream());
-    shrink_to_fit_dataframe_buffer(payload_buffer, handle.get_stream());*/
+    shrink_to_fit_dataframe_buffer(payload_buffer, handle.get_stream());
   } else {
-   /* auto num_uniques =
+    printf("^^^^^^^^^^^^^^^^^^^^^^^^^\n");
+    auto num_uniques =
       thrust::count_if(handle.get_thrust_policy(),
                        thrust::make_counting_iterator(size_t{0}),
                        thrust::make_counting_iterator(size_dataframe_buffer(key_buffer)),
@@ -166,10 +167,10 @@ auto sort_and_reduce_buffer_elements(
                           get_dataframe_buffer_begin(new_key_buffer),
                           get_dataframe_buffer_begin(new_payload_buffer),
                           thrust::equal_to<key_t>(),
-                          reduce_op);
+                          reduce_op); 
 
     key_buffer     = std::move(new_key_buffer);
-    payload_buffer = std::move(new_payload_buffer);*/
+    payload_buffer = std::move(new_payload_buffer);
   }
 
   return std::make_tuple(std::move(key_buffer), std::move(payload_buffer));
@@ -360,14 +361,45 @@ transform_reduce_v_frontier_outgoing_e_by_dst(raft::handle_t const& handle,
                                                                     size_,
                                                                     nodes
                                                                     );
-  printf("After extract\n");
 
+   
+  int *host_buf = new int[key_buffer.size()];
+  cudaMemcpy(host_buf, key_buffer.begin(), sizeof(int)*key_buffer.size(), cudaMemcpyDeviceToHost);
+  for(int i=0;i<key_buffer.size();i++)
+  {
+    if(host_buf[i] == 21365148)
+    {
+      printf("Is there before sort\n");
+      break;
+    }
+  }
   // 2. reduce the buffer
   std::cout<<key_buffer.size()<<"\n";
   std::tie(key_buffer, payload_buffer) =
     detail::sort_and_reduce_buffer_elements<key_t, payload_t, ReduceOp>(
       handle, std::move(key_buffer), std::move(payload_buffer), reduce_op);
   printf("Sorting done\n");
+
+  cudaMemcpy(host_buf, key_buffer.begin(), sizeof(int)*key_buffer.size(), cudaMemcpyDeviceToHost);
+  for(int i=0;i<key_buffer.size();i++)
+  {
+    if(host_buf[i] == 21365148)
+    {
+      printf("Is there After sort\n");
+      break;
+    }
+  }
+
+ /* thrust::for_each(
+      rmm::exec_policy(handle.get_thrust_policy()),
+      get_dataframe_buffer_begin(key_buffer),
+      get_dataframe_buffer_end(key_buffer),
+      [] __device__(auto v) {
+        printf("key buffer=%d\n", v);
+      });*/
+
+  printf("After extract\n");
+
   if constexpr (GraphViewType::is_multi_gpu) {
 
     // FIXME: this step is unnecessary if row_comm_size== 1
