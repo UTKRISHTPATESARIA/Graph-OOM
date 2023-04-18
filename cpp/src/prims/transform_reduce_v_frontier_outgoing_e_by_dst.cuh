@@ -148,7 +148,6 @@ auto sort_and_reduce_buffer_elements(
     shrink_to_fit_dataframe_buffer(key_buffer, handle.get_stream());
     shrink_to_fit_dataframe_buffer(payload_buffer, handle.get_stream());
   } else {
-    printf("^^^^^^^^^^^^^^^^^^^^^^^^^\n");
     auto num_uniques =
       thrust::count_if(handle.get_thrust_policy(),
                        thrust::make_counting_iterator(size_t{0}),
@@ -344,7 +343,6 @@ transform_reduce_v_frontier_outgoing_e_by_dst(raft::handle_t const& handle,
                       EdgeOp>
     e_op_wrapper{e_op};
 
-  //printf("Before extract\n");
 
   auto [key_buffer, payload_buffer] =
     detail::extract_transform_v_frontier_e<false, key_t, payload_t>(handle,
@@ -363,42 +361,13 @@ transform_reduce_v_frontier_outgoing_e_by_dst(raft::handle_t const& handle,
                                                                     );
 
    
-  int *host_buf = new int[key_buffer.size()];
-  cudaMemcpy(host_buf, key_buffer.begin(), sizeof(int)*key_buffer.size(), cudaMemcpyDeviceToHost);
-  for(int i=0;i<key_buffer.size();i++)
-  {
-    if(host_buf[i] == 21365148)
-    {
-      printf("Is there before sort\n");
-      break;
-    }
-  }
   // 2. reduce the buffer
-  std::cout<<key_buffer.size()<<"\n";
+
   std::tie(key_buffer, payload_buffer) =
     detail::sort_and_reduce_buffer_elements<key_t, payload_t, ReduceOp>(
       handle, std::move(key_buffer), std::move(payload_buffer), reduce_op);
-  printf("Sorting done\n");
 
-  cudaMemcpy(host_buf, key_buffer.begin(), sizeof(int)*key_buffer.size(), cudaMemcpyDeviceToHost);
-  for(int i=0;i<key_buffer.size();i++)
-  {
-    if(host_buf[i] == 21365148)
-    {
-      printf("Is there After sort\n");
-      break;
-    }
-  }
 
- /* thrust::for_each(
-      rmm::exec_policy(handle.get_thrust_policy()),
-      get_dataframe_buffer_begin(key_buffer),
-      get_dataframe_buffer_end(key_buffer),
-      [] __device__(auto v) {
-        printf("key buffer=%d\n", v);
-      });*/
-
-  printf("After extract\n");
 
   if constexpr (GraphViewType::is_multi_gpu) {
 

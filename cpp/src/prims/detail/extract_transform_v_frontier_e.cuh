@@ -431,20 +431,13 @@ __global__ void extract_transform_v_frontier_e_low_degree(
       }*/
 
       if(label1){
-        if(label1[major] == false){
-          printf("RED FLAG\n");
-          idx_ = -1;
-        }
-        else{
-          label1[major] = false;
-        }
+        label1[major] = false;
       } 
       
       auto major_offset = edge_partition.major_offset_from_major_nocheck(idx_);
-      local_degree      = (idx_ == -1) ? 0 : edge_partition.local_degree(major_offset);
-      warp_key_local_edge_offsets[threadIdx.x] = (idx_ == -1) ? 0 :edge_partition.local_offset(major_offset);
-      if(major == 21365149)
-        printf("major=%d, local_degree=%d, warp_key_local_edge_offsets=%d, index=%d\n", major, local_degree, warp_key_local_edge_offsets[threadIdx.x], idx_);
+      local_degree      = edge_partition.local_degree(major_offset);
+      warp_key_local_edge_offsets[threadIdx.x] = edge_partition.local_offset(major_offset);
+
     }
 
     WarpScan(temp_storage)
@@ -475,7 +468,7 @@ __global__ void extract_transform_v_frontier_e_low_degree(
                                  ? edge_t{0}
                                  : warp_local_degree_inclusive_sums[warp_id * raft::warp_size() +
                                                                     key_idx_this_warp - 1]));
-       // printf("local_edge_offset=%d, local_degree=%d\n", local_edge_offset,local_degree );
+
         auto key = *(key_first + (min_key_idx + key_idx_this_warp));
         vertex_t major{};
         if constexpr (std::is_same_v<key_t, vertex_t>) {
@@ -486,7 +479,6 @@ __global__ void extract_transform_v_frontier_e_low_degree(
         if(subVertex[major] != -1){
           auto minor  = indices[local_edge_offset];
 
-        // printf("in for loop major=%d minor=%d subVertex[major]=%d subVertex[minor]=%d \n", major, minor, subVertex[major], subVertex[minor]);
           
           auto major_offset = edge_partition.major_offset_from_major_nocheck(subVertex[major]);
           auto minor_offset = edge_partition.minor_offset_from_minor_nocheck(subVertex[minor]);
@@ -509,16 +501,13 @@ __global__ void extract_transform_v_frontier_e_low_degree(
 
             auto src_offset = GraphViewType::is_storage_transposed ? minor_offset : major_offset;
             auto dst_offset = GraphViewType::is_storage_transposed ? major_offset : minor_offset;
-          // printf("major=%d minor=%d\n", major, minor);
+
             e_op_result     = e_op(key_or_src,
                               key_or_dst,
                               edge_partition_src_value_input.get(src_offset),
                               edge_partition_dst_value_input.get(dst_offset),
                               edge_partition_e_value_input.get(local_edge_offset)
                                 );
-            if(major == 21365149){
-              printf("*****************major=%d minor=%d\n", major, minor);
-            }
         }
 
 
@@ -968,7 +957,6 @@ extract_transform_v_frontier_e(raft::handle_t const& handle,
       handle.get_stream(),
       subVertex,
       size_);
-    std::cout<<"max_pushes "<<max_pushes<<"\n";
    // printf("Line 945\n");
     auto new_buffer_size = buffer_idx.value(handle.get_stream()) + max_pushes;
 
@@ -1114,14 +1102,13 @@ extract_transform_v_frontier_e(raft::handle_t const& handle,
             total_nodes
             );
           
-        printf("Returned from low\n");
       }
     }
   }
   //printf("Finished for loop in extract\n");
   // 2. resize and return the buffers
   auto new_buffer_size = buffer_idx.value(handle.get_stream());
-  std::cout<<new_buffer_size<<"\n";
+
   //printf("Finished for loop 2 in extract\n");
   resize_optional_dataframe_buffer<output_key_t>(key_buffer, new_buffer_size, handle.get_stream());
   //printf("Finished for loop 3 in extract\n");
