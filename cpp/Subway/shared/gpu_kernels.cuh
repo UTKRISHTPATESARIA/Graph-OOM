@@ -128,6 +128,13 @@ __global__ void clearLabel(unsigned int * activeNodes, bool *label, unsigned int
 
 __global__ void mixLabels(unsigned int * activeNodes, bool *label1, bool *label2, unsigned int size, unsigned int from);
 
+__global__ void populate_visited_(unsigned int * activeNodes, bool *label1, bool *label2, unsigned int size, unsigned int from, int* source, unsigned long int *counter, int *lock);
+
+__global__ void populate_subVertex_one_(unsigned int * activeNodesPointer, unsigned int * activeNodes, unsigned int size, unsigned int from, int* subVertex, unsigned int val);
+
+__global__ void populate_subVertex_two_(unsigned int * activeNodesPointer, unsigned int * activeNodes, unsigned int size, unsigned int from, int* subVertex, int val);
+
+
 __global__ void moveUpLabels(unsigned int * activeNodes, bool *label1, bool *label2, unsigned int size, unsigned int from);
 
 

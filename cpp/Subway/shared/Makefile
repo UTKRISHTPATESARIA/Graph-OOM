@@ -1,7 +1,7 @@
 CC=g++
 NC=/usr/local/cuda/bin/nvcc
 CFLAGS=-std=c++14 -O3
-NFLAGS=-arch=sm_86
+NFLAGS=-arch=sm_86 --extended-lambda
 
 
 all: timer.o argument_parsing.o graph.o subgraph.o partitioner.o subgraph_generator.o gpu_kernels.o subway_utilities.o test.o

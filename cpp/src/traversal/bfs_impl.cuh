@@ -76,15 +76,13 @@ struct e_op_t {
     nullptr};  // relevant only if multi_gpu is false (this affects only local-computing with 0
                // impact in communication volume, so this may improve performance in small-scale but
                // will eat-up more memory with no benefit in performance in large-scale).
-  vertex_t* distances_d{};
   vertex_t dst_first{};  // relevant only if multi_gpu is true
   
 
-  //__device__ thrust::optional<vertex_t> operator()(
-    __device__ thrust::optional<thrust::tuple<vertex_t, vertex_t>> operator()(
+  __device__ thrust::optional<vertex_t> operator()(
     vertex_t src, vertex_t dst, thrust::nullopt_t, thrust::nullopt_t, thrust::nullopt_t) const
   {
-    /*bool push{};
+    bool push{};
     if constexpr (multi_gpu) {
       auto dst_offset = dst - dst_first;
       auto old        = atomicOr(visited_flags.get_iter(dst_offset), uint8_t{1});
@@ -99,63 +97,32 @@ struct e_op_t {
         push     = ((old & mask) == 0);
       }
     }
-    printf("push=%d\n", push);*/
-    //return push ? thrust::optional<vertex_t>{src} : thrust::nullopt;
+    return push ? thrust::optional<vertex_t>{src} : thrust::nullopt;
+  }
+};  
+
+template <typename vertex_t, bool multi_gpu>
+struct e_op_t_subway {
+  std::conditional_t<multi_gpu,
+                     detail::edge_partition_endpoint_property_device_view_t<vertex_t, uint8_t*>,
+                     uint32_t*>
+    visited_flags{};
+  uint32_t const* prev_visited_flags{
+    nullptr};  // relevant only if multi_gpu is false (this affects only local-computing with 0
+               // impact in communication volume, so this may improve performance in small-scale but
+               // will eat-up more memory with no benefit in performance in large-scale).
+  vertex_t* distances_d{};
+  vertex_t dst_first{};  // relevant only if multi_gpu is true
+  
+    __device__ thrust::optional<thrust::tuple<vertex_t, vertex_t>> operator()(
+    vertex_t src, vertex_t dst, thrust::nullopt_t, thrust::nullopt_t, thrust::nullopt_t) const
+  {
     return thrust::optional<thrust::tuple<vertex_t, vertex_t>>{thrust::make_tuple(
                     distances_d[src], src)};
-    //return thrust::optional<vertex_t>{src};
   }
 };
 
 }  // namespace
-
-namespace helper_functions {
-
-template <typename T>
-std::vector<T> to_host(raft::handle_t const& handle, raft::device_span<T const> data)
-{
-  std::vector<T> h_data(data.size());
-  raft::update_host(h_data.data(), data.data(), data.size(), handle.get_stream());
-  handle.sync_stream();
-  return h_data;
-}
-
-template <typename T>
-std::vector<T> to_host(raft::handle_t const& handle, rmm::device_uvector<T> const& data)
-{
-  std::vector<T> h_data(data.size());
-  raft::update_host(h_data.data(), data.data(), data.size(), handle.get_stream());
-  handle.sync_stream();
-  return h_data;
-}
-
-template <typename T>
-std::optional<std::vector<T>> to_host(raft::handle_t const& handle,
-                                      std::optional<raft::device_span<T const>> data)
-{
-  std::optional<std::vector<T>> h_data{std::nullopt};
-  if (data) {
-    h_data = std::vector<T>((*data).size());
-    raft::update_host((*h_data).data(), (*data).data(), (*data).size(), handle.get_stream());
-    handle.sync_stream();
-  }
-  return h_data;
-}
-
-template <typename T>
-std::optional<std::vector<T>> to_host(raft::handle_t const& handle,
-                                      std::optional<rmm::device_uvector<T>> const& data)
-{
-  std::optional<std::vector<T>> h_data{std::nullopt};
-  if (data) {
-    h_data = std::vector<T>((*data).size());
-    raft::update_host((*h_data).data(), (*data).data(), (*data).size(), handle.get_stream());
-    handle.sync_stream();
-  }
-  return h_data;
-}
-
-}
 
 namespace detail {
 
@@ -269,14 +236,14 @@ void bfs(raft::handle_t const& handle,
 
   // mode switch for uvm -> Resize later.
   rmm::device_uvector<uint32_t> visited_flags(
-    0, 
-   // (push_graph_view.local_vertex_partition_range_size() + (sizeof(uint32_t) * 8 - 1)) /
-    //  (sizeof(uint32_t) * 8),
+    label1? 0 :  
+    (push_graph_view.local_vertex_partition_range_size() + (sizeof(uint32_t) * 8 - 1)) /
+      (sizeof(uint32_t) * 8),
     handle.get_stream());
   if(mode == 0)
     thrust::fill(handle.get_thrust_policy(), visited_flags.begin(), visited_flags.end(), uint32_t{0});
   rmm::device_uvector<uint32_t> prev_visited_flags(
-    GraphViewType::is_multi_gpu ? size_t{0} : size_t{0},//vis_size,//label1? nodes: visited_flags.size(),
+    GraphViewType::is_multi_gpu ? size_t{0} : (label1 ? size_t{0}: visited_flags.size()),
     handle.get_stream());  // relevant only if GraphViewType::is_multi_gpu is false
   auto dst_visited_flags = GraphViewType::is_multi_gpu
                              ? edge_dst_property_t<GraphViewType, uint8_t>(handle, push_graph_view)
@@ -309,94 +276,147 @@ void bfs(raft::handle_t const& handle,
                      visited_flags.end(),
                      prev_visited_flags.begin());
         }
-        else{
-          /*thrust::copy(handle.get_thrust_policy(),
-                     visited,
-                     visited + vis_size,
-                     prev_visited_flags.begin());*/
+      }
+
+      if(mode == 1){
+        e_op_t_subway<vertex_t, GraphViewType::is_multi_gpu> e_op{};
+        if constexpr (GraphViewType::is_multi_gpu) {
+          e_op.visited_flags =
+            detail::edge_partition_endpoint_property_device_view_t<vertex_t, uint8_t*>(
+              dst_visited_flags.mutable_view());
+          e_op.dst_first = push_graph_view.local_edge_partition_dst_range_first();
+        } else {
+          e_op.visited_flags      = label1 ? visited: visited_flags.data();
+          e_op.prev_visited_flags = prev_visited_flags.data();
+          e_op.distances_d = distances;
         }
-      }
-   //   std::cout<<"flag sizes ------ "<<prev_visited_flags.size()<<" "<<vis_size<<"\n";
-
-     // printf("After  visited flags fill\n");
-      e_op_t<vertex_t, GraphViewType::is_multi_gpu> e_op{};
-      if constexpr (GraphViewType::is_multi_gpu) {
-        e_op.visited_flags =
-          detail::edge_partition_endpoint_property_device_view_t<vertex_t, uint8_t*>(
-            dst_visited_flags.mutable_view());
-        e_op.dst_first = push_graph_view.local_edge_partition_dst_range_first();
-      } else {
-        e_op.visited_flags      = label1 ? visited: visited_flags.data();
-        e_op.prev_visited_flags = prev_visited_flags.data();
-        e_op.distances_d = distances;
-        // e_op.subway = true;
-      }
 
 
-      auto [new_frontier_vertex_buffer, predecessor_buffer] =
-        transform_reduce_v_frontier_outgoing_e_by_dst(handle,
-                                                      push_graph_view,
-                                                      vertex_frontier.bucket(bucket_idx_cur),
-                                                      edge_src_dummy_property_t{}.view(),
-                                                      edge_dst_dummy_property_t{}.view(),
-                                                      edge_dummy_property_t{}.view(),
-#if 1
-                                                       e_op,
-#else
-          // FIXME: need to test more about the performance trade-offs between additional
-          // communication in updating dst_visited_flags (+ using atomics) vs reduced number of
-          // pushes (leading to both less computation & communication in reduction)
-          [vertex_partition, distances] __device__(
-            vertex_t src, vertex_t dst, auto, auto, auto) {
-            auto push = true;
-            if (vertex_partition.in_local_vertex_partition_range_nocheck(dst)) {
-              auto distance =
-                *(distances +
-                  vertex_partition.local_vertex_partition_offset_from_vertex_nocheck(dst));
-              if (distance != invalid_distance) { push = false; }
-            }
-            return thrust::make_tuple(push, src);
-          },
-#endif
-                                                      //reduce_op::any<vertex_t>(),
-                                                      reduce_op::minimum<thrust::tuple<vertex_t, vertex_t>>(),
-                                                      false,
-                                                      (depth % 2 ==1 ) ? label2 : label1,
-                                                      (depth % 2 ==1 ) ? label1 : label2,
-                                                      subVertex,
-                                                      num_vertices,
-                                                      vertex_frontier.bucket(bucket_idx_cur).aggregate_size());
+        auto [new_frontier_vertex_buffer, predecessor_buffer] =
+          transform_reduce_v_frontier_outgoing_e_by_dst(handle,
+                                                        push_graph_view,
+                                                        vertex_frontier.bucket(bucket_idx_cur),
+                                                        edge_src_dummy_property_t{}.view(),
+                                                        edge_dst_dummy_property_t{}.view(),
+                                                        edge_dummy_property_t{}.view(),
+  #if 1
+                                                        e_op,
+  #else
+            // FIXME: need to test more about the performance trade-offs between additional
+            // communication in updating dst_visited_flags (+ using atomics) vs reduced number of
+            // pushes (leading to both less computation & communication in reduction)
+            [vertex_partition, distances] __device__(
+              vertex_t src, vertex_t dst, auto, auto, auto) {
+              auto push = true;
+              if (vertex_partition.in_local_vertex_partition_range_nocheck(dst)) {
+                auto distance =
+                  *(distances +
+                    vertex_partition.local_vertex_partition_offset_from_vertex_nocheck(dst));
+                if (distance != invalid_distance) { push = false; }
+              }
+              return thrust::make_tuple(push, src);
+            },
+  #endif
+                                                        //reduce_op::any<vertex_t>(),
+                                                        reduce_op::minimum<thrust::tuple<vertex_t, vertex_t>>(),
+                                                        false,
+                                                        (depth % 2 ==1 ) ? label2 : label1,
+                                                        (depth % 2 ==1 ) ? label1 : label2,
+                                                        subVertex,
+                                                        num_vertices,
+                                                        nodes);
 
 
     
-    update_v_frontier(
-      handle,
-      push_graph_view,
-      std::move(new_frontier_vertex_buffer),
-      std::move(predecessor_buffer),
-      vertex_frontier,
-      std::vector<size_t>{bucket_idx_next},
-      distances,
-      thrust::make_zip_iterator(thrust::make_tuple(distances, predecessor_first)),
-      [distances, predecessor_first, d_finished, depth] __device__(auto v, auto v_val, auto pushed_val) {
-        auto update = false;
-        auto pred = thrust::get<1>(pushed_val);
-        auto dist = distances[pred]+1;
-        if(distances[v] > dist){
-          v_val = dist;
-          d_finished[0] = 0;
-          update = true;
+      update_v_frontier(
+        handle,
+        push_graph_view,
+        std::move(new_frontier_vertex_buffer),
+        std::move(predecessor_buffer),
+        vertex_frontier,
+        std::vector<size_t>{bucket_idx_next},
+        distances,
+        thrust::make_zip_iterator(thrust::make_tuple(distances, predecessor_first)),
+        [distances, predecessor_first, d_finished, depth] __device__(auto v, auto v_val, auto pushed_val) {
+          auto update = false;
+          auto pred = thrust::get<1>(pushed_val);
+          auto dist = distances[pred]+1;
+          if(distances[v] > dist){
+            v_val = dist;
+            d_finished[0] = 0;
+            update = true;
+          }
+
+          return thrust::make_tuple(
+            update ? thrust::optional<size_t>{bucket_idx_next} : thrust::nullopt,
+            update ? thrust::optional<thrust::tuple<vertex_t, vertex_t>>{thrust::make_tuple(
+                        v_val, pred)}
+                    : thrust::nullopt);
+        },
+        subVertex,
+        depth%2 ? label1:label2
+        );
+      }
+      else{
+        e_op_t<vertex_t, GraphViewType::is_multi_gpu> e_op{};
+        if constexpr (GraphViewType::is_multi_gpu) {
+          e_op.visited_flags =
+            detail::edge_partition_endpoint_property_device_view_t<vertex_t, uint8_t*>(
+              dst_visited_flags.mutable_view());
+          e_op.dst_first = push_graph_view.local_edge_partition_dst_range_first();
+        } else {
+          e_op.visited_flags      = visited_flags.data();
+          e_op.prev_visited_flags = prev_visited_flags.data();
         }
 
-        return thrust::make_tuple(
-          update ? thrust::optional<size_t>{bucket_idx_next} : thrust::nullopt,
-          update ? thrust::optional<thrust::tuple<vertex_t, vertex_t>>{thrust::make_tuple(
-                       v_val, pred)}
-                  : thrust::nullopt);
-      },
-      subVertex,
-      depth%2 ? label1:label2
-      );
+
+        auto [new_frontier_vertex_buffer, predecessor_buffer] =
+          transform_reduce_v_frontier_outgoing_e_by_dst(handle,
+                                                        push_graph_view,
+                                                        vertex_frontier.bucket(bucket_idx_cur),
+                                                        edge_src_dummy_property_t{}.view(),
+                                                        edge_dst_dummy_property_t{}.view(),
+                                                        edge_dummy_property_t{}.view(),
+  #if 1
+                                                        e_op,
+  #else
+            // FIXME: need to test more about the performance trade-offs between additional
+            // communication in updating dst_visited_flags (+ using atomics) vs reduced number of
+            // pushes (leading to both less computation & communication in reduction)
+            [vertex_partition, distances] __device__(
+              vertex_t src, vertex_t dst, auto, auto, auto) {
+              auto push = true;
+              if (vertex_partition.in_local_vertex_partition_range_nocheck(dst)) {
+                auto distance =
+                  *(distances +
+                    vertex_partition.local_vertex_partition_offset_from_vertex_nocheck(dst));
+                if (distance != invalid_distance) { push = false; }
+              }
+              return thrust::make_tuple(push, src);
+            },
+  #endif
+                                                        reduce_op::any<vertex_t>());
+
+
+    
+      update_v_frontier(
+        handle,
+        push_graph_view,
+        std::move(new_frontier_vertex_buffer),
+        std::move(predecessor_buffer),
+        vertex_frontier,
+        std::vector<size_t>{bucket_idx_next},
+        distances,
+        thrust::make_zip_iterator(thrust::make_tuple(distances, predecessor_first)),
+        [depth] __device__(auto v, auto v_val, auto pushed_val) {
+          auto update = (v_val == invalid_distance);
+          return thrust::make_tuple(
+            update ? thrust::optional<size_t>{bucket_idx_next} : thrust::nullopt,
+            update ? thrust::optional<thrust::tuple<vertex_t, vertex_t>>{thrust::make_tuple(
+                       depth + 1, pushed_val)}
+                   : thrust::nullopt);
+        });
+      }
 
       
       vertex_frontier.bucket(bucket_idx_cur).clear();

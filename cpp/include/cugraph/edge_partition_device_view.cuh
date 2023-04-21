@@ -58,7 +58,6 @@ __device__ thrust::optional<vertex_t> major_hypersparse_idx_from_major_nocheck_i
                            : thrust::nullopt)
            : thrust::nullopt;
 }
-//__device__ int return_index_subway(int index); { return cugraph::detail::globalSubVertex[index]; }
 
 template <typename vertex_t, typename edge_t, typename return_type_t, bool multi_gpu, bool use_dcs>
 struct local_degree_op_t {
@@ -92,8 +91,7 @@ struct local_degree_op_t {
         return static_cast<return_type_t>(offsets[idx + 1] - offsets[idx]);
       }
     } else {
-      //printf("\n\n Inside indexing : %d %d \n\n ", sizeof(globalSubVertex[10]), major);
-      return static_cast<return_type_t>(offsets[globalSubVertex[major] + 1] - offsets[globalSubVertex[major]]);
+      return static_cast<return_type_t>(offsets[major + 1] - offsets[major]);
     }
   }
 };
@@ -113,11 +111,10 @@ struct local_degree_op_t_subway {
       //printf("why\n");
       if(sub_vertex[major] == -1)
         return 0;
-      if(major > 41652220 || major<0){
-       // printf("Errorooorrr RRREEEEDDDDDD FLAGGGG in edge\n");
-      }
-     // printf("major=%d subvertex[major+1]=%d subVertex[major]=%d offsets[.m+1.]=%d offsets[..m..]=%d diff=%d\n", major, sub_vertex[major]+1, sub_vertex[major],
-      //offsets[sub_vertex[major] + 1], offsets[sub_vertex[major]],offsets[sub_vertex[major] + 1] - offsets[sub_vertex[major]] );
+
+       // printf("major=%d subvertex[major+1]=%d subVertex[major]=%d offsets[.m+1.]=%d offsets[..m..]=%d diff=%d\n", major, sub_vertex[major]+1, sub_vertex[major],
+        //offsets[sub_vertex[major] + 1], offsets[sub_vertex[major]],offsets[sub_vertex[major] + 1] - offsets[sub_vertex[major]] );
+     // }
       return static_cast<return_type_t>(offsets[sub_vertex[major] + 1] - offsets[sub_vertex[major]]);
   }
 };
@@ -387,6 +384,7 @@ class edge_partition_device_view_t<vertex_t, edge_t, multi_gpu, std::enable_if_t
                                  const size_t size_ = 0) const
   {
    // printf("Computer number of edges\n");
+   if(subVertex){
     return thrust::transform_reduce(
       rmm::exec_policy(stream),
       majors.begin(),
@@ -401,7 +399,14 @@ class edge_partition_device_view_t<vertex_t, edge_t, multi_gpu, std::enable_if_t
                                        std::byte{0} /* dummy */,
                                        std::byte{0} /* dummy */,
                                        std::byte{0} /* dummy */},
- /*                                      :
+      size_t{0},
+      thrust::plus<size_t>());
+   }
+   else{
+    return thrust::transform_reduce(
+      rmm::exec_policy(stream),
+      majors.begin(),
+      majors.end(),
       detail::local_degree_op_t<vertex_t,
                                 edge_t,
                                 size_t,
@@ -409,9 +414,10 @@ class edge_partition_device_view_t<vertex_t, edge_t, multi_gpu, std::enable_if_t
                                 false>{this->offsets_,
                                        std::byte{0} ,
                                        std::byte{0} ,
-                                       std::byte{0} },*/
+                                       std::byte{0} },
       size_t{0},
       thrust::plus<size_t>());
+   }
   }
 
   rmm::device_uvector<edge_t> compute_local_degrees(rmm::cuda_stream_view stream) const

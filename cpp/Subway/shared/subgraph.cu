@@ -31,8 +31,8 @@ Subgraph<E>::Subgraph(uint num_nodes, uint num_edges)
 
     cout << "\n Available memory " << mem_free << " \n";
 
-    //max_partition_size = 0.1 * ( mem_free  - (4*(1UL << 30)) - 8*4*num_nodes) / sizeof(E);
-	max_partition_size = 100000000;
+    max_partition_size = 0.1 * ( mem_free  - 8*4*num_nodes) / sizeof(E);
+	//max_partition_size = 100000000;
     cout << "\n Max Partition size : " << max_partition_size << "\n";
 		
 	if(max_partition_size > DIST_INFINITY)
@@ -45,11 +45,11 @@ Subgraph<E>::Subgraph(uint num_nodes, uint num_edges)
 	
 	gpuErrorcheck(cudaMallocHost(&activeNodes, num_nodes * sizeof(uint)));
 	gpuErrorcheck(cudaMallocHost(&activeNodesPointer, (num_nodes+1) * sizeof(uint)));
-	gpuErrorcheck(cudaMallocHost(&activeEdgeList, num_edges * sizeof(E)));
+	//gpuErrorcheck(cudaMallocHost(&activeEdgeList, num_edges * sizeof(E)));
 	
 	gpuErrorcheck(cudaMalloc(&d_activeNodes, num_nodes * sizeof(unsigned int)));
 	gpuErrorcheck(cudaMalloc(&d_activeNodesPointer, (num_nodes+1) * sizeof(unsigned int)));
-	gpuErrorcheck(cudaMalloc(&d_activeEdgeList, (max_partition_size) * sizeof(E)));
+	//gpuErrorcheck(cudaMalloc(&d_activeEdgeList, (max_partition_size) * sizeof(E)));
 }
 
 template class Subgraph<OutEdge>;

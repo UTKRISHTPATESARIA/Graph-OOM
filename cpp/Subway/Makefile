@@ -3,7 +3,7 @@
 CC=g++
 NC=/usr/local/cuda/bin/nvcc
 CFLAGS=-std=c++14 -O3
-NFLAGS=-arch=sm_86
+NFLAGS=-arch=sm_86 --extended-lambda
 
 SHARED=shared
 SUBWAY=subway

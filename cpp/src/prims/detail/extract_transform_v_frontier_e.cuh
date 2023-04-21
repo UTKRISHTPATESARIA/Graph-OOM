@@ -401,7 +401,6 @@ __global__ void extract_transform_v_frontier_e_low_degree(
   auto rounded_up_num_keys =
     ((static_cast<size_t>(num_keys) + (raft::warp_size() - 1)) / raft::warp_size()) *
     raft::warp_size();
-  vertex_t dup_src;
   while (idx < rounded_up_num_keys) {
     auto min_key_idx = static_cast<vertex_t>(idx - (idx % raft::warp_size()));  // inclusive
     auto max_key_idx =
@@ -422,22 +421,18 @@ __global__ void extract_transform_v_frontier_e_low_degree(
       } else {
         major = thrust::get<0>(key);
       }
-      
-      idx_ = subVertex[major];
-      
-      /*if(idx_ == -1){
-        idx += gridDim.x * blockDim.x;
-        continue;
-      }*/
 
       if(label1){
+        idx_ = subVertex[major];
         label1[major] = false;
       } 
+      else{
+        idx_ = major;
+      }
       
       auto major_offset = edge_partition.major_offset_from_major_nocheck(idx_);
       local_degree      = edge_partition.local_degree(major_offset);
-      warp_key_local_edge_offsets[threadIdx.x] = edge_partition.local_offset(major_offset);
-
+      warp_key_local_edge_offsets[threadIdx.x] = edge_partition.local_offset(major_offset) - partition_size;
     }
 
     WarpScan(temp_storage)
@@ -476,7 +471,6 @@ __global__ void extract_transform_v_frontier_e_low_degree(
         } else {
           major = thrust::get<0>(key);
         }
-        if(subVertex[major] != -1){
           auto minor  = indices[local_edge_offset];
 
           
@@ -496,20 +490,18 @@ __global__ void extract_transform_v_frontier_e_low_degree(
             
           }
 
-
-            label1[major] = false;
+            if(label1){
+              label1[major] = false;
+            }
 
             auto src_offset = GraphViewType::is_storage_transposed ? minor_offset : major_offset;
             auto dst_offset = GraphViewType::is_storage_transposed ? major_offset : minor_offset;
-
             e_op_result     = e_op(key_or_src,
                               key_or_dst,
                               edge_partition_src_value_input.get(src_offset),
                               edge_partition_dst_value_input.get(dst_offset),
                               edge_partition_e_value_input.get(local_edge_offset)
                                 );
-        }
-
 
       }
 
@@ -957,7 +949,7 @@ extract_transform_v_frontier_e(raft::handle_t const& handle,
       handle.get_stream(),
       subVertex,
       size_);
-   // printf("Line 945\n");
+
     auto new_buffer_size = buffer_idx.value(handle.get_stream()) + max_pushes;
 
     resize_optional_dataframe_buffer<output_key_t>(

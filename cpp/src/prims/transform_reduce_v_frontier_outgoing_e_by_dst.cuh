@@ -343,7 +343,6 @@ transform_reduce_v_frontier_outgoing_e_by_dst(raft::handle_t const& handle,
                       EdgeOp>
     e_op_wrapper{e_op};
 
-
   auto [key_buffer, payload_buffer] =
     detail::extract_transform_v_frontier_e<false, key_t, payload_t>(handle,
                                                                     graph_view,

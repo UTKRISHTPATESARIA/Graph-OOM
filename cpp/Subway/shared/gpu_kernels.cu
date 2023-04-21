@@ -522,6 +522,45 @@ __global__ void mixLabels(unsigned int * activeNodes, bool *label1, bool *label2
 	}
 }
 
+__global__ void populate_visited_(unsigned int * activeNodes, bool *label1, bool *label2, unsigned int size, unsigned int from, int* source, unsigned long int *counter, int *lock)
+{
+	unsigned int id = blockDim.x * blockIdx.x + threadIdx.x;
+	if(id < size){
+        
+		int nid = activeNodes[id+from];
+		if(label1[nid] || label2[nid]){
+			unsigned int val = 1;
+			int newCount = atomicAdd((unsigned int*)counter, (unsigned int)val);
+			source[newCount] = nid;
+		}
+	}
+	
+    
+}
+
+__global__ void populate_subVertex_one_(unsigned int * activeNodesPointer, unsigned int * activeNodes, unsigned int size, unsigned int from, int* subVertex, unsigned int val)
+{
+	unsigned int id = blockDim.x * blockIdx.x + threadIdx.x;
+	if(id < size){
+        
+		int nid = activeNodes[id+from];
+		//printf("%d %d\n", nid, id);
+		subVertex[nid] = id;
+		//activeNodesPointer[id+from] -= val;
+		
+	}
+}
+
+__global__ void populate_subVertex_two_(unsigned int * activeNodesPointer, unsigned int * activeNodes, unsigned int size, unsigned int from, int* subVertex, int val)
+{
+	unsigned int id = blockDim.x * blockIdx.x + threadIdx.x;
+	if(id < size){
+        
+		int nid = activeNodes[id+from];
+		subVertex[nid] = -1;
+	}
+}
+
 __global__ void moveUpLabels(unsigned int * activeNodes, bool *label1, bool *label2, unsigned int size, unsigned int from)
 {
 	unsigned int id = blockDim.x * blockIdx.x + threadIdx.x;

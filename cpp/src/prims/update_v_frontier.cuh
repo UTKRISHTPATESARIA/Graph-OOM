@@ -267,6 +267,8 @@ void update_v_frontier(raft::handle_t const& handle,
     auto key_payload_pair_first = thrust::make_zip_iterator(thrust::make_tuple(
       get_dataframe_buffer_begin(key_buffer), get_dataframe_buffer_begin(payload_buffer)));
 
+    
+    if(label){
     thrust::transform(handle.get_thrust_policy(),
                       key_payload_pair_first,
                       key_payload_pair_first + size_dataframe_buffer(key_buffer),
@@ -284,8 +286,14 @@ void update_v_frontier(raft::handle_t const& handle,
                         v_op,
                         graph_view.local_vertex_partition_range_first(),
                         label}
-                       /* :
-                        detail::update_v_frontier_call_v_op_t<vertex_t,
+                        );
+    }
+    else{
+      thrust::transform(handle.get_thrust_policy(),
+                      key_payload_pair_first,
+                      key_payload_pair_first + size_dataframe_buffer(key_buffer),
+                      bucket_indices.begin(),
+                      detail::update_v_frontier_call_v_op_t<vertex_t,
                                                             VertexValueInputIterator,
                                                             VertexValueOutputIterator,
                                                             VertexOp,
@@ -295,38 +303,42 @@ void update_v_frontier(raft::handle_t const& handle,
                         vertex_value_input_first,
                         vertex_value_output_first,
                         v_op,
-                        graph_view.local_vertex_partition_range_first()}*/
+                        graph_view.local_vertex_partition_range_first()}
                         );
+    }
     cudaDeviceSynchronize();
      cudaDeviceSynchronize();
 
     resize_dataframe_buffer(payload_buffer, size_t{0}, handle.get_stream());
     shrink_to_fit_dataframe_buffer(payload_buffer, handle.get_stream());
 
-    std::vector<int> v;
 
-    auto new_key_buffer = thrust::remove_if(
-    handle.get_thrust_policy(),
-    key_buffer.begin(),
-    key_buffer.end(),
-      [subVertex, label] __device__ (auto v) {
-        //printf("vertex=%d subVertex[v]=%d label[v]=%d\n", v, subVertex[v], label[v]); 
-        return (subVertex[v] == -1) || (label[v]==false);
-      }
-    );
-
-    int num_ele = new_key_buffer - key_buffer.begin();
-
-    /*vertex_t *host_key_buffer = new vertex_t[num_ele];
-    cudaMemcpy(host_key_buffer, get_dataframe_buffer_begin(key_buffer), num_ele*(sizeof(vertex_t)), cudaMemcpyDeviceToHost);
-    std::cout<<"host key buffer after remove if\n";
-    for(int i=0;i<num_ele;i++){
-      std::cout<<host_key_buffer[i]<<" ";
+    if(label){
+      auto new_key_buffer = thrust::remove_if(
+      handle.get_thrust_policy(),
+      key_buffer.begin(),
+      key_buffer.end(),
+        [subVertex, label] __device__ (auto v) {
+          //printf("vertex=%d subVertex[v]=%d label[v]=%d\n", v, subVertex[v], label[v]); 
+          return (subVertex[v] == -1) || (label[v]==false);
+        }
+      );
+      int num_ele = new_key_buffer - key_buffer.begin();
+      resize_dataframe_buffer(key_buffer, num_ele, handle.get_stream());
+      resize_dataframe_buffer(bucket_indices, num_ele, handle.get_stream()); 
     }
-    std::cout<<"\n";*/
-
-    resize_dataframe_buffer(key_buffer, num_ele, handle.get_stream());
-    resize_dataframe_buffer(bucket_indices, num_ele, handle.get_stream()); 
+    else{
+      auto bucket_key_pair_first = thrust::make_zip_iterator(
+      thrust::make_tuple(bucket_indices.begin(), get_dataframe_buffer_begin(key_buffer)));
+      bucket_indices.resize(
+      thrust::distance(bucket_key_pair_first,
+                       thrust::remove_if(handle.get_thrust_policy(),
+                                         bucket_key_pair_first,
+                                         bucket_key_pair_first + bucket_indices.size(),
+                                         detail::check_invalid_bucket_idx_t<key_t>())),
+      handle.get_stream());
+      resize_dataframe_buffer(key_buffer, bucket_indices.size(), handle.get_stream());
+    }
 
     bucket_indices.shrink_to_fit(handle.get_stream());
     shrink_to_fit_dataframe_buffer(key_buffer, handle.get_stream());
@@ -339,7 +351,6 @@ void update_v_frontier(raft::handle_t const& handle,
 
     resize_dataframe_buffer(key_buffer, 0, handle.get_stream());
     shrink_to_fit_dataframe_buffer(key_buffer, handle.get_stream());
-    //d_new_key_buffer.release();
 
   }
 }

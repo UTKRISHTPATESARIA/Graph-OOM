@@ -111,8 +111,10 @@ static bool g_perf{false};
 static std::optional<size_t> g_rmat_scale{std::nullopt};
 static std::optional<size_t> g_rmat_edge_factor{std::nullopt};
 static std::optional<std::string> g_test_file_name{std::nullopt};
+// static std::string g_test_file_name{std::nullopt};
 static size_t g_source_node{0};
 static bool g_subway{false};
+static int percentage{0};
 
 inline Rmat_Usecase override_Rmat_Usecase_with_cmd_line_arguments(Rmat_Usecase usecase)
 {
@@ -215,8 +217,8 @@ inline auto parse_test_options(int argc, char** argv)
   {                                                                                     \
     ::testing::InitGoogleTest(&argc, argv);                                             \
     rmm::cuda_stream_view stream = rmm::cuda_stream_view{};                             \
-    int percentage = std::stoi(argv[1]);                                               \
-    long long reserve_memory =((24*(1UL<<30))/100)*percentage;                  \
+    cugraph::test::percentage = std::stoi(argv[1]);                                               \
+    long long reserve_memory =((24*(1UL<<30))/100)*cugraph::test::percentage;                  \
     rmm::device_buffer device_buff1(reserve_memory, stream);                           \
     auto const cmd_opts = parse_test_options(argc, argv);                               \
     auto const rmm_mode = cmd_opts["rmm_mode"].as<std::string>();                       \

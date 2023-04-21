@@ -107,7 +107,7 @@ class TranslateGraph_Usecase {
 
 struct BFS_Usecase {
   size_t source{1};
-  bool check_correctness{true};
+  bool check_correctness{false};
 };
 
 class File_Usecase : public detail::TranslateGraph_Usecase {
@@ -127,6 +127,10 @@ class File_Usecase : public detail::TranslateGraph_Usecase {
     } else {
       graph_file_full_path_ = graph_file_path;
     }
+  }
+
+  std::string get_filename(){
+    return graph_file_full_path_;
   }
 
   template <typename vertex_t, typename weight_t>
@@ -162,7 +166,7 @@ class File_Usecase : public detail::TranslateGraph_Usecase {
       std::move(srcs), std::move(dsts), std::move(weights), std::move(vertices), is_symmetric);
   }
 
- private:
+ //private:
   std::string graph_file_full_path_{};
 };
 
