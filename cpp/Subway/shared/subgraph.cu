@@ -6,7 +6,7 @@
 
 
 template <class E>
-Subgraph<E>::Subgraph(uint num_nodes, uint num_edges)
+Subgraph<E>::Subgraph(uint num_nodes, uint num_edges, ull max_size)
 {
 	cudaProfilerStart();
 	cudaError_t error;
@@ -24,26 +24,61 @@ Subgraph<E>::Subgraph(uint num_nodes, uint num_edges)
 	long long reserve_memory =((24*(1UL<<30))/100)*percentage + (5*(1UL<<30));  
 	max_partition_size = 0.1 * ((dev.totalGlobalMem-reserve_memory) - 8*4*num_nodes) / sizeof(E);*/
 
-	
-	/*size_t mem_free, mem_avail;
+	//ull max_size = 25445793792;
+	//ull init_size = 1073741824;
 
-    cudaMemGetInfo(&mem_free, &mem_avail);
+	ull mem_free, mem_avail;
+
+    cudaMemGetInfo((size_t *)&mem_free, (size_t *)&mem_avail);
 
     cout << "\n Available memory " << mem_avail << " \n";
 
 	cout << "\n Free memory " << mem_free << " \n";
 
-     max_partition_size = 0.5 * ( mem_free  - (6*(1UL<<30))) / sizeof(E);*/
+    /* max_partition_size = 0.5 * ( mem_free  - (6*(1UL<<30))) / sizeof(E);*/
 
-	//max_partition_size = 1e8;
+	//max_partition_size = floor((double)(mem_free*1.0 / max_size) * init_size);
 
-	unsigned long long percentage = 70;
-	unsigned long long reserve_memory =(unsigned long long)((24*(1ULL<<30))/100)*percentage;
-	reserve_memory += (unsigned long long)(6*(1UL<<30));  
-	//max_partition_size = 0.5 * ((dev.totalGlobalMem-reserve_memory) - 8*4*num_nodes) / sizeof(E);
-	max_partition_size = 1e8;
+	
+	//max_partition_size = 0.9 * ((dev.totalGlobalMem - 8*4*num_nodes) / sizeof(E);
+	//max_partition_size = 1073741824/4;
+
+	//max_partition_size = (mem_free - (size_t)4665049760)/8;
+	//if(max_partition_size < 5000000)
+	//	max_partition_size = 5000000;
+	//max_partition_size = 10000000;
+	//cout<<"size of uint "<<sizeof(uint64_t)<<"\n";
+	//cout<<13*(8*num_nodes)<<" "<<num_nodes<<" "<<8*num_nodes<<"\n";
+	/*ull ds_to_consider = num_nodes;
+	ds_to_consider *= 8;
+	ds_to_consider *= 12;
+	
+
+	if(mem_free > ds_to_consider)
+		max_partition_size = (mem_free - ds_to_consider)/48;
+	else
+		max_partition_size = 10000000;*/
+	
+	//max_partition_size = 1073741824;
+		//num_nodes = 41652230;
+	/*ull ds_to_consider = 94*num_nodes;
+	ull degree = 6;
+	ull denom = 24/degree + 8;
+	ull thrust_call_size = 8*(num_nodes + 10); // 1GB
+	ull summ =  thrust_call_size + ds_to_consider;
+	//cout<<0.9*mem_free<<"\n";
+	//cout<<summ<<"\n";
+	if(0.9*mem_free > summ){
+		ull numerator = 0.9*mem_free - summ;
+		max_partition_size = 0.9*(numerator / denom);
+	}
+	else
+		max_partition_size = 10000000;*/
+	max_partition_size = max_size;
+	//max_partition_size = 0.3*mem_free;
     cout << "\n Max Partition size : " << max_partition_size << "\n";
-		
+
+	//exit(0);
 	if(max_partition_size > DIST_INFINITY)
 		max_partition_size = DIST_INFINITY;
 	

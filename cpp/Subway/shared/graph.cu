@@ -50,7 +50,7 @@ void Graph<E>::ReadGraph()
 		infile.read ((char*)edgeList, sizeof(E)*num_edges);
 		nodePointer[num_nodes] = num_edges;
 	}
-	else if(graphFormat == "el" || graphFormat == "wel")
+	else if(graphFormat == "el" || graphFormat == "wel" || graphFormat == "csv")
 	{
 		ifstream infile;
 		infile.open(graphFilePath);
@@ -138,8 +138,12 @@ void Graph<E>::ReadGraph()
 			infile.close();
 			num_nodes = max + 1;
 			num_edges = edgeCounter;
+			//cudaMallocManaged(&nodePointer, (num_nodes+1)*sizeof(E));
 			nodePointer = new uint[num_nodes+1];
-			gpuErrorcheck(cudaMallocHost(&edgeList, (num_edges) * sizeof(E)));
+			//gpuErrorcheck(cudaMallocHost(&edgeList, (num_edges) * sizeof(E)));
+			//edgeArray
+			edgeArray = new uint[num_edges];
+			//gpuErrorcheck(cudaMallocManaged(&edgeArray, (num_edges) * sizeof(E)));
 			uint *degree = new uint[num_nodes];
 			for(uint i=0; i<num_nodes; i++)
 				degree[i] = 0;
@@ -153,12 +157,17 @@ void Graph<E>::ReadGraph()
 				counter = counter + degree[i];
 			}
 			nodePointer[num_nodes] = num_edges;
+			cout<<counter - nodePointer[num_nodes-1]<<"\n";
 			uint *outDegreeCounter  = new uint[num_nodes];
 			uint location;  
+			for(int i=0;i<num_nodes;i++){
+				outDegreeCounter[i] = 0;
+			}
 			for(uint i=0; i<num_edges; i++)
 			{
 				location = nodePointer[edges[i].source] + outDegreeCounter[edges[i].source];
-				edgeList[location].end = edges[i].end;
+				//edgeList[location].end = edges[i].end;
+				edgeArray[location] = edges[i].end;
 				//if(isWeighted)
 				//	edgeList[location].w8 = edges[i].w8;
 				outDegreeCounter[edges[i].source]++;  
@@ -176,19 +185,20 @@ void Graph<E>::ReadGraph()
 	
 	outDegree  = new unsigned int[num_nodes];
 	
-	for(uint i=1; i<num_nodes-1; i++)
+	for(uint i=1; i<=num_nodes; i++)
 		outDegree[i-1] = nodePointer[i] - nodePointer[i-1];
-	outDegree[num_nodes-1] = num_edges - nodePointer[num_nodes-1];
+	cout<<outDegree[num_nodes-1]<<"\n";
+	//outDegree[num_nodes-1]=0;
 	
 	label1 = new bool[num_nodes];
 	label2 = new bool[num_nodes];
-	value  = new unsigned int[num_nodes];
+	//value  = new unsigned int[num_nodes];
 	
-	gpuErrorcheck(cudaMalloc(&d_outDegree, num_nodes * sizeof(unsigned int)));
-	gpuErrorcheck(cudaMalloc(&d_value, num_nodes * sizeof(unsigned int)));
-	gpuErrorcheck(cudaMalloc(&d_label1, num_nodes * sizeof(bool)));
-	gpuErrorcheck(cudaMalloc(&d_label2, num_nodes * sizeof(bool)));
-	
+	//gpuErrorcheck(cudaMalloc(&d_outDegree, num_nodes * sizeof(unsigned int)));
+	//gpuErrorcheck(cudaMalloc(&d_value, num_nodes * sizeof(unsigned int)));
+	//gpuErrorcheck(cudaMalloc(&d_label1, num_nodes * sizeof(bool)));
+	//gpuErrorcheck(cudaMalloc(&d_label2, num_nodes * sizeof(bool)));
+
 	cout << "Done reading.\n";
 	cout << "Number of nodes = " << num_nodes << endl;
 	cout << "Number of edges = " << num_edges << endl;
@@ -247,7 +257,7 @@ void GraphPR<E>::ReadGraph()
 		infile.read ((char*)edgeList, sizeof(E)*num_edges);
 		nodePointer[num_nodes] = num_edges;
 	}
-	else if(graphFormat == "el" || graphFormat == "wel")
+	else if(graphFormat == "el" || graphFormat == "wel" || graphFormat == "csv")
 	{
 		ifstream infile;
 		infile.open(graphFilePath);
@@ -336,7 +346,8 @@ void GraphPR<E>::ReadGraph()
 			num_nodes = max + 1;
 			num_edges = edgeCounter;
 			nodePointer = new uint[num_nodes+1];
-			gpuErrorcheck(cudaMallocHost(&edgeList, (num_edges) * sizeof(E)));
+			//gpuErrorcheck(cudaMallocHost(&edgeList, (num_edges) * sizeof(E)));
+			edgeArray = new uint[num_edges];
 			uint *degree = new uint[num_nodes];
 			for(uint i=0; i<num_nodes; i++)
 				degree[i] = 0;
@@ -352,10 +363,14 @@ void GraphPR<E>::ReadGraph()
 			nodePointer[num_nodes] = num_edges;
 			uint *outDegreeCounter  = new uint[num_nodes];
 			uint location;  
+			for(int i=0;i<num_nodes;i++){
+				outDegreeCounter[i] = 0;
+			}
 			for(uint i=0; i<num_edges; i++)
 			{
 				location = nodePointer[edges[i].source] + outDegreeCounter[edges[i].source];
-				edgeList[location].end = edges[i].end;
+				//edgeList[location].end = edges[i].end;
+				edgeArray[location] = edges[i].end;
 				//if(isWeighted)
 				//	edgeList[location].w8 = edges[i].w8;
 				outDegreeCounter[edges[i].source]++;  
@@ -373,17 +388,17 @@ void GraphPR<E>::ReadGraph()
 	
 	outDegree  = new unsigned int[num_nodes];
 	
-	for(uint i=1; i<num_nodes-1; i++)
+	for(uint i=1; i<=num_nodes; i++)
 		outDegree[i-1] = nodePointer[i] - nodePointer[i-1];
-	outDegree[num_nodes-1] = num_edges - nodePointer[num_nodes-1];
+	//outDegree[num_nodes-1]=0;
 	
 
-	value  = new float[num_nodes];
+	//value  = new float[num_nodes];
 	delta  = new float[num_nodes];
 	
-	gpuErrorcheck(cudaMalloc(&d_outDegree, num_nodes * sizeof(unsigned int)));
+	/*gpuErrorcheck(cudaMalloc(&d_outDegree, num_nodes * sizeof(unsigned int)));
 	gpuErrorcheck(cudaMalloc(&d_value, num_nodes * sizeof(float)));
-	gpuErrorcheck(cudaMalloc(&d_delta, num_nodes * sizeof(float)));
+	gpuErrorcheck(cudaMalloc(&d_delta, num_nodes * sizeof(float)));*/
 	
 	
 	cout << "Done reading.\n";

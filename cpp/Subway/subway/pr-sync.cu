@@ -46,7 +46,7 @@ int main(int argc, char** argv)
 	gpuErrorcheck(cudaMemcpy(graph.d_value, graph.value, graph.num_nodes * sizeof(float), cudaMemcpyHostToDevice));
 	gpuErrorcheck(cudaMemcpy(graph.d_delta, graph.delta, graph.num_nodes * sizeof(float), cudaMemcpyHostToDevice));
 	
-	Subgraph<OutEdge> subgraph(graph.num_nodes, graph.num_edges);
+	Subgraph<OutEdge> subgraph(graph.num_nodes, graph.num_edges, 0);
 	
 	SubgraphGenerator<OutEdge> subgen(graph);
 	

@@ -29,6 +29,7 @@ public:
 	SubgraphGenerator(GraphPR<E> &graph);
 	void generate(Graph<E> &graph, Subgraph<E> &subgraph);
 	void generate(GraphPR<E> &graph, Subgraph<E> &subgraph, float acc);
+	void generate(GraphPR<E> &graph, Subgraph<E> &subgraph, int *edgelist, float acc);
 	void generate(Graph<E> &graph, Subgraph<E> &subgraph, int *edgelist);
 	void callKernel(Subgraph<OutEdge> &subgraph, Graph<OutEdge> &graph, Partitioner<OutEdge> &partitioner, 
 					int i);

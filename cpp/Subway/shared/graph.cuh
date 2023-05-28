@@ -17,6 +17,7 @@ public:
 	uint num_edges;
 	uint *nodePointer;
 	E *edgeList;
+	uint *edgeArray;
 	uint *outDegree;
 	bool *label1;
 	bool *label2;
@@ -45,6 +46,7 @@ public:
 	uint num_edges;
 	uint *nodePointer;
 	E *edgeList;
+	uint *edgeArray;
 	uint *outDegree;
 	float *value;
 	float *delta;
