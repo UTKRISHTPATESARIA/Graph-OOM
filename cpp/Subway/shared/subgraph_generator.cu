@@ -190,43 +190,12 @@ void SubgraphGenerator<E>::callKernel(Subgraph<OutEdge> &subgraph, Graph<OutEdge
 template <class E>
 void SubgraphGenerator<E>::populate_visited(Subgraph<OutEdge> &subgraph, Graph<OutEdge> &graph, Partitioner<OutEdge> &partitioner,
 										int i, int* source, unsigned long int *counter) {
-	int *host_lock = new int[1];
-	host_lock[0] = 0;
-	int *device_lock;
-	cudaMalloc(&device_lock, sizeof(int));
-	cudaMemcpy(device_lock, host_lock, sizeof(int), cudaMemcpyHostToDevice);
-
 	*counter = 0;
 	unsigned long int *d_counter;
 	cudaMalloc(&d_counter, sizeof(unsigned int));
 	cudaMemcpy(d_counter, counter, sizeof(int), cudaMemcpyHostToDevice);
-	
-
-    populate_visited_<<<partitioner.partitionNodeSize[i]/512 + 1 , 512>>>(subgraph.d_activeNodes, graph.d_label1, graph.d_label2, partitioner.partitionNodeSize[i], partitioner.fromNode[i], source, d_counter, device_lock);
-	
+    populate_visited_<<<partitioner.partitionNodeSize[i]/512 + 1 , 512>>>(subgraph.d_activeNodes, graph.d_label1, graph.d_label2, partitioner.partitionNodeSize[i], partitioner.fromNode[i], source, d_counter);
 	cudaMemcpy(counter, d_counter, sizeof(int), cudaMemcpyDeviceToHost);
-    // Create a sample device array
-    //thrust::device_vector<int> arr(partitioner.partitionNodeSize[i]);
-    //thrust::sequence(arr.begin(), arr.end());
-
-    // Find the indices where the array is greater than 5
-	// printf("\n\nPopulate\n\n");
-    //thrust::device_vector<int> indices(partitioner.partitionNodeSize[i]);
-    /* auto end = thrust::copy_if(//thrust::make_zip_iterator(thrust::make_tuple(thrust::counting_iterator<int>(0), arr.begin())),
-                               //thrust::make_zip_iterator(thrust::make_tuple(thrust::counting_iterator<int>(0), arr.end())),
-							   subgraph.d_activeNodes + partitioner.fromNode[i],
-							   subgraph.d_activeNodes + partitioner.fromNode[i] + partitioner.partitionNodeSize[i], 
-                               source,
-                               [graph] __device__ (auto x) {
-									printf("%d\n", x);
-                                   return graph.d_label1[x] || graph.d_label2[x] ;
-                               }); */
-
-    // Resize the indices vector to the actual number of elements copied
-    //indices.resize(thrust::distance(indices.begin(), end));
-	
-	// num_ele = end - source;
-	//thrust::copy(indices.begin(), end, source);
 }
 
 template <class E>

@@ -139,10 +139,8 @@ void bfs(raft::handle_t const& handle,
          bool do_expensive_check,
          int mode,
          int nodes,
-         int vis_size,
          bool *label1 = nullptr,
          bool *label2 = nullptr,
-         uint32_t* visited = nullptr,
          int* subVertex = nullptr,
          int *d_finished = nullptr
          )
@@ -286,11 +284,9 @@ void bfs(raft::handle_t const& handle,
               dst_visited_flags.mutable_view());
           e_op.dst_first = push_graph_view.local_edge_partition_dst_range_first();
         } else {
-          e_op.visited_flags      = label1 ? visited: visited_flags.data();
-          e_op.prev_visited_flags = prev_visited_flags.data();
           e_op.distances_d = distances;
         }
-
+        //raft::handle_t handle_new{};
 
         auto [new_frontier_vertex_buffer, predecessor_buffer] =
           transform_reduce_v_frontier_outgoing_e_by_dst(handle,
@@ -337,7 +333,7 @@ void bfs(raft::handle_t const& handle,
         std::vector<size_t>{bucket_idx_next},
         distances,
         thrust::make_zip_iterator(thrust::make_tuple(distances, predecessor_first)),
-        [distances, predecessor_first, d_finished, depth] __device__(auto v, auto v_val, auto pushed_val) {
+        [distances, d_finished] __device__(auto v, auto v_val, auto pushed_val) {
           auto update = false;
           auto pred = thrust::get<1>(pushed_val);
           auto dist = distances[pred]+1;
@@ -398,7 +394,7 @@ void bfs(raft::handle_t const& handle,
                                                         reduce_op::any<vertex_t>());
 
 
-    
+
       update_v_frontier(
         handle,
         push_graph_view,
@@ -462,7 +458,6 @@ void bfs(raft::handle_t const& handle,
                 depth_limit,
                 do_expensive_check,
                 0,
-                0,
                 0
                 );
   } else {
@@ -475,7 +470,6 @@ void bfs(raft::handle_t const& handle,
                 direction_optimizing,
                 depth_limit,
                 do_expensive_check,
-                0,
                 0,
                 0,
                 nullptr,
@@ -494,10 +488,8 @@ void bfs_subway(raft::handle_t const& handle,
          vertex_t const* sources,
          bool *label1,
          bool *label2,
-         uint32_t* visited,
          int* subVertex,
          int nodes,
-         int vis_size,
          int *d_finished,
          size_t n_sources,
          bool direction_optimizing,
@@ -518,10 +510,8 @@ void bfs_subway(raft::handle_t const& handle,
                 do_expensive_check,
                 1,
                 nodes,
-                vis_size,
                 label1,
                 label2,
-                visited,
                 subVertex,
                 d_finished
                 );
@@ -537,10 +527,8 @@ void bfs_subway(raft::handle_t const& handle,
                 do_expensive_check,
                 1,
                 nodes,
-                vis_size,
                 label1,
                 label2,
-                visited,
                 subVertex,
                 d_finished
                 );

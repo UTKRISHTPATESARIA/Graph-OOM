@@ -309,6 +309,10 @@ void update_v_frontier(raft::handle_t const& handle,
     cudaDeviceSynchronize();
      cudaDeviceSynchronize();
 
+    //thrust::device_free(key_payload_pair_first);
+    //thrust::device_free(thrust::raw_pointer_cast(zip_iter.get_iterator_tuple().get<1>().base()));
+
+
     resize_dataframe_buffer(payload_buffer, size_t{0}, handle.get_stream());
     shrink_to_fit_dataframe_buffer(payload_buffer, handle.get_stream());
 

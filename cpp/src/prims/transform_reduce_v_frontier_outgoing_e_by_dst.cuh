@@ -18,7 +18,8 @@
 #include <prims/detail/extract_transform_v_frontier_e.cuh>
 #include <prims/property_op_utils.cuh>
 #include <prims/reduce_op.cuh>
-
+#include <cuda_runtime.h>
+#include <cuda_profiler_api.h>
 #include <cugraph/edge_partition_device_view.cuh>
 #include <cugraph/edge_partition_endpoint_property_device_view.cuh>
 #include <cugraph/edge_src_dst_property.hpp>
@@ -115,16 +116,32 @@ auto sort_and_reduce_buffer_elements(
                                                          rmm::cuda_stream_view{}))&& payload_buffer,
   ReduceOp reduce_op)
 {
+  size_t mem_free, mem_avail;
   if constexpr (std::is_same_v<payload_t, void>) {
     thrust::sort(handle.get_thrust_policy(),
                  get_dataframe_buffer_begin(key_buffer),
                  get_dataframe_buffer_end(key_buffer));
   } else {
+    /*printf("In sort line 123\n");
+    cudaPointerAttributes attributes;
+    cudaPointerGetAttributes(&attributes, key_buffer.begin());
+    if (attributes.type == cudaMemoryTypeManaged)
+    {
+        std::cout << "Pointer is mallocManaged" << std::endl;
+    }
+    else
+    {
+        std::cout << "Pointer is not mallocManaged" << std::endl;
+    }*/
+    
     thrust::sort_by_key(handle.get_thrust_policy(),
                         get_dataframe_buffer_begin(key_buffer),
                         get_dataframe_buffer_end(key_buffer),
                         get_optional_dataframe_buffer_begin<payload_t>(payload_buffer));
+  
+
   }
+
 
   if constexpr (std::is_same_v<payload_t, void>) {
     auto it = thrust::unique(handle.get_thrust_policy(),
@@ -156,8 +173,13 @@ auto sort_and_reduce_buffer_elements(
                          get_dataframe_buffer_begin(key_buffer)});
 
     auto new_key_buffer = allocate_dataframe_buffer<key_t>(num_uniques, handle.get_stream());
+
+
+
+
     auto new_payload_buffer =
       allocate_dataframe_buffer<payload_t>(num_uniques, handle.get_stream());
+
 
     thrust::reduce_by_key(handle.get_thrust_policy(),
                           get_dataframe_buffer_begin(key_buffer),
@@ -359,12 +381,15 @@ transform_reduce_v_frontier_outgoing_e_by_dst(raft::handle_t const& handle,
                                                                     nodes
                                                                     );
 
-   
+ // printf("key buffer size=%dB, payload_buff_size=%dB\n", key_buffer.size(), 2*key_buffer.size());
   // 2. reduce the buffer
 
+  //unsigned long long siz = 3*key_buffer.size();
+  //std::cout<<"size of thrust call can be: "<<siz<<"\n";
   std::tie(key_buffer, payload_buffer) =
     detail::sort_and_reduce_buffer_elements<key_t, payload_t, ReduceOp>(
       handle, std::move(key_buffer), std::move(payload_buffer), reduce_op);
+
 
 
 

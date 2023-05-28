@@ -298,7 +298,7 @@ class graph_t<vertex_t, edge_t, store_transposed, multi_gpu, std::enable_if_t<!m
     offsets_.release();
     indices_.release();
   }
- private:
+ //private:
   rmm::device_uvector<edge_t> offsets_;
   rmm::device_uvector<vertex_t> indices_;
 

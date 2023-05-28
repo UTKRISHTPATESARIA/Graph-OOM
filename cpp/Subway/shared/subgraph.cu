@@ -25,14 +25,23 @@ Subgraph<E>::Subgraph(uint num_nodes, uint num_edges)
 	max_partition_size = 0.1 * ((dev.totalGlobalMem-reserve_memory) - 8*4*num_nodes) / sizeof(E);*/
 
 	
-	size_t mem_free, mem_avail;
+	/*size_t mem_free, mem_avail;
 
     cudaMemGetInfo(&mem_free, &mem_avail);
 
-    cout << "\n Available memory " << mem_free << " \n";
+    cout << "\n Available memory " << mem_avail << " \n";
 
-    max_partition_size = 0.1 * ( mem_free  - 8*4*num_nodes) / sizeof(E);
-	//max_partition_size = 100000000;
+	cout << "\n Free memory " << mem_free << " \n";
+
+     max_partition_size = 0.5 * ( mem_free  - (6*(1UL<<30))) / sizeof(E);*/
+
+	//max_partition_size = 1e8;
+
+	unsigned long long percentage = 70;
+	unsigned long long reserve_memory =(unsigned long long)((24*(1ULL<<30))/100)*percentage;
+	reserve_memory += (unsigned long long)(6*(1UL<<30));  
+	//max_partition_size = 0.5 * ((dev.totalGlobalMem-reserve_memory) - 8*4*num_nodes) / sizeof(E);
+	max_partition_size = 1e8;
     cout << "\n Max Partition size : " << max_partition_size << "\n";
 		
 	if(max_partition_size > DIST_INFINITY)

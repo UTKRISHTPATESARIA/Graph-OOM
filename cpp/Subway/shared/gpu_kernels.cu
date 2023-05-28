@@ -522,7 +522,7 @@ __global__ void mixLabels(unsigned int * activeNodes, bool *label1, bool *label2
 	}
 }
 
-__global__ void populate_visited_(unsigned int * activeNodes, bool *label1, bool *label2, unsigned int size, unsigned int from, int* source, unsigned long int *counter, int *lock)
+__global__ void populate_visited_(unsigned int * activeNodes, bool *label1, bool *label2, unsigned int size, unsigned int from, int* source, unsigned long int *counter)
 {
 	unsigned int id = blockDim.x * blockIdx.x + threadIdx.x;
 	if(id < size){
@@ -544,9 +544,7 @@ __global__ void populate_subVertex_one_(unsigned int * activeNodesPointer, unsig
 	if(id < size){
         
 		int nid = activeNodes[id+from];
-		//printf("%d %d\n", nid, id);
 		subVertex[nid] = id;
-		//activeNodesPointer[id+from] -= val;
 		
 	}
 }

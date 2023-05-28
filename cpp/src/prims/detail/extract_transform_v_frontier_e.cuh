@@ -29,6 +29,7 @@
 #include <cugraph/utilities/error.hpp>
 #include <cugraph/utilities/host_scalar_comm.hpp>
 #include <cugraph/detail/utility_wrappers.hpp>
+#include <cuda_profiler_api.h>
 
 
 #include <raft/core/handle.hpp>
@@ -67,7 +68,7 @@ namespace cugraph {
 
 namespace detail {
 
-int32_t constexpr extract_transform_v_frontier_e_kernel_block_size = 1024;
+int32_t constexpr extract_transform_v_frontier_e_kernel_block_size = 512;
 
 // we cannot use thrust::iterator_traits<Iterator>::value_type if Iterator is void* (reference to
 // void is not allowed)
@@ -831,7 +832,7 @@ extract_transform_v_frontier_e(raft::handle_t const& handle,
                                       std::conditional_t<!std::is_same_v<output_key_t, void>,
                                                          thrust::optional<output_key_t>,
                                                          thrust::optional<output_value_t>>>>);
-
+  size_t mem_free, mem_avail;
  //printf("Beforew do expensive check extrct file\n");
   if (do_expensive_check) {
     vertex_t const* frontier_vertex_first{nullptr};
@@ -875,12 +876,15 @@ extract_transform_v_frontier_e(raft::handle_t const& handle,
   }
 
   // 1. fill the buffers
-
-  auto key_buffer =
+  
+ auto key_buffer =
     allocate_optional_dataframe_buffer<output_key_t>(size_t{0}, handle.get_stream());
   auto value_buffer =
     allocate_optional_dataframe_buffer<output_value_t>(size_t{0}, handle.get_stream());
   rmm::device_scalar<size_t> buffer_idx(size_t{0}, handle.get_stream());
+  
+  //rmm::device_uvector<size_t> key_buffer(0, handle.get_stream());
+  //rmm::device_uvector<size_t> value_buffer(0, handle.get_stream());
 
   std::vector<size_t> local_frontier_sizes{};
   if constexpr (GraphViewType::is_multi_gpu) {
@@ -894,8 +898,10 @@ extract_transform_v_frontier_e(raft::handle_t const& handle,
       static_cast<vertex_t>(thrust::distance(frontier_key_first, frontier_key_last)))};
   }
 
+  
+  
   for (size_t i = 0; i < graph_view.number_of_local_edge_partitions(); ++i) {
-    //printf("Line 895 extract\n");
+   //printf("Line 895 extract\n");
     auto edge_partition =
         edge_partition_device_view_t<vertex_t, edge_t, GraphViewType::is_multi_gpu>(
         graph_view.local_edge_partition_view(i));
@@ -906,6 +912,8 @@ extract_transform_v_frontier_e(raft::handle_t const& handle,
    // std::cout<<"local frontier size ----------- "<<local_frontier_sizes[i]<<"\n";
     auto edge_partition_frontier_key_first = frontier_key_first;
     auto edge_partition_frontier_key_last  = frontier_key_last;
+    
+
     if constexpr (GraphViewType::is_multi_gpu) {
       auto& col_comm = handle.get_subcomm(cugraph::partition_2d::key_naming_t().col_name());
       auto const col_comm_rank = col_comm.get_rank();
@@ -950,13 +958,16 @@ extract_transform_v_frontier_e(raft::handle_t const& handle,
       subVertex,
       size_);
 
+
     auto new_buffer_size = buffer_idx.value(handle.get_stream()) + max_pushes;
 
     resize_optional_dataframe_buffer<output_key_t>(
       key_buffer, new_buffer_size, handle.get_stream());
     resize_optional_dataframe_buffer<output_value_t>(
       value_buffer, new_buffer_size, handle.get_stream());
-    //printf("Line 952\n");
+
+
+
     edge_partition_src_input_device_view_t edge_partition_src_value_input{};
     edge_partition_dst_input_device_view_t edge_partition_dst_value_input{};
     if constexpr (GraphViewType::is_storage_transposed) {
@@ -964,7 +975,6 @@ extract_transform_v_frontier_e(raft::handle_t const& handle,
       edge_partition_dst_value_input =
         edge_partition_dst_input_device_view_t(edge_dst_value_input, i);
     } else {
-     // printf("Line 960\n");
       edge_partition_src_value_input =
         edge_partition_src_input_device_view_t(edge_src_value_input, i);
       edge_partition_dst_value_input = edge_partition_dst_input_device_view_t(edge_dst_value_input);
@@ -1075,6 +1085,7 @@ extract_transform_v_frontier_e(raft::handle_t const& handle,
         raft::grid_1d_thread_t update_grid(edge_partition_frontier_size,
                                            extract_transform_v_frontier_e_kernel_block_size,
                                            handle.get_device_properties().maxGridSize[0]);
+
         extract_transform_v_frontier_e_low_degree<GraphViewType>
           <<<update_grid.num_blocks, update_grid.block_size, 0, handle.get_stream()>>>(
             edge_partition,
@@ -1097,20 +1108,26 @@ extract_transform_v_frontier_e(raft::handle_t const& handle,
       }
     }
   }
-  //printf("Finished for loop in extract\n");
+  
   // 2. resize and return the buffers
   auto new_buffer_size = buffer_idx.value(handle.get_stream());
 
+
   //printf("Finished for loop 2 in extract\n");
   resize_optional_dataframe_buffer<output_key_t>(key_buffer, new_buffer_size, handle.get_stream());
+
+
   //printf("Finished for loop 3 in extract\n");
   shrink_to_fit_optional_dataframe_buffer<output_key_t>(key_buffer, handle.get_stream());
+
   //printf("Finished for loop 4 in extract\n");
   resize_optional_dataframe_buffer<output_value_t>(
     value_buffer, new_buffer_size, handle.get_stream());
   // printf("Finished for loop5  in extract\n");
   shrink_to_fit_optional_dataframe_buffer<output_value_t>(value_buffer, handle.get_stream());
   //printf("Finished for loop 6 in extract\n");
+
+
   return std::make_tuple(std::move(key_buffer), std::move(value_buffer));
 }
 
